@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, func
 from sqlalchemy.dialects.postgresql import JSON
 from datetime import datetime
 from .database import Base
@@ -18,7 +18,7 @@ class Agent(Base):
     name = Column(String)
     domain_id = Column(Integer, ForeignKey("domains.id"))
     skills = Column(String)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class LLMConfig(Base):
     __tablename__ = "llm_configs"
@@ -34,7 +34,7 @@ class Workflow(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String)
     graph_json = Column(JSON)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class Task(Base):
@@ -44,4 +44,15 @@ class Task(Base):
     name = Column(String)
     description = Column(String)
     workflow_id = Column(Integer, ForeignKey("workflows.id"))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class TaskRun(Base):
+    __tablename__ = "task_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"))
+    status = Column(String, default="pending")  # pending, running, completed, failed
+    logs = Column(Text, nullable=True)
+    result = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
