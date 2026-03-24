@@ -1,0 +1,175 @@
+# ===========================================
+# Environment & Secrets
+# ===========================================
+.env
+.env.local
+.env.*.local
+*.secrets
+credentials.json
+
+# ===========================================
+# Python
+# ===========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# ===========================================
+# Backend Specific
+# ===========================================
+backend/__pycache__/
+backend/*.pyc
+backend/*.pyo
+backend/.pytest_cache/
+backend/.coverage
+backend/htmlcov/
+backend/celerybeat-schedule
+backend/celerybeat.pid
+backend/db/migrations/versions/*.py
+!backend/db/migrations/versions/.gitkeep
+
+# ===========================================
+# Anaconda/Miniconda
+# ===========================================
+.conda/
+conda-meta/
+pkgs/
+
+# ===========================================
+# Node.js
+# ===========================================
+node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.next/
+.nuxt/
+dist/
+
+# ===========================================
+# Docker
+# ===========================================
+.docker/
+docker-compose.override.yml
+.dockerignore
+
+# ===========================================
+# IDE & Editors
+# ===========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# ===========================================
+# OS Generated
+# ===========================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ===========================================
+# Logs & Debugging
+# ===========================================
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+
+# ===========================================
+# Testing
+# ===========================================
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# ===========================================
+# History (project-specific)
+# ===========================================
+.history/
+.idea/workspace.xml
+.idea/tasks.xml
+
+# ===========================================
+# Database
+# ===========================================
+*.sqlite
+*.db
+*.sql
+*.sqlite3
+pg_data/
+
+# ===========================================
+# Temporary Files
+# ===========================================
+tmp/
+temp/
+*.tmp
+*.temp
+tmp/*
+temp/*
+
+# ===========================================
+# Misc
+# ===========================================
+*.bak
+*.backup
+*.orig
+*.rej
+*.patch
+*.diff
+*.tmp
+~*.docx
+~*.xlsx
+
+# ===========================================
+# Keep These Files
+# ===========================================
+# !.env.example - Uncomment if you want to track .env.example
+# !backend/db/migrations/versions/.gitkeep

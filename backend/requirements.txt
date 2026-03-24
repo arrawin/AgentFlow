@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+sqlalchemy
+psycopg2-binary
+celery
+redis
+requests
+langgraph
+langchain
+langchain-core
+cryptography
+alembic
+pydantic
+pydantic-settings
+python-dotenv
