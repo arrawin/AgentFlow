@@ -1,9 +1,10 @@
 from execution.celery_app import celery_app
 from db.database import SessionLocal
-from db.models import Agent, Task, Workflow
+from db.models import Agent, Task, Workflow, TaskRun, RunLog
 from services.llm_service import LLMService
 from langgraph.graph import StateGraph
 from tools.registry import TOOLS
+from datetime import datetime
 import json
 
 
@@ -15,125 +16,96 @@ def run_task(task_id: int):
         # 🔹 Fetch task
         task = db.query(Task).filter(Task.id == task_id).first()
         if not task:
-            print(f"Error: Task {task_id} not found")
+            print("Task not found")
             return
+
+        # 🔥 CREATE RUN
+        task_run = TaskRun(
+            task_id=task_id,
+            status="in_progress"
+        )
+        db.add(task_run)
+        db.commit()
+        db.refresh(task_run)
+
+        # 🔥 LOGGER
+        def log(event_type, message, node_id=None, agent_id=None):
+            log_entry = RunLog(
+                task_run_id=task_run.id,
+                node_id=node_id,
+                agent_id=agent_id,
+                event_type=event_type,
+                message=message
+            )
+            db.add(log_entry)
+            db.commit()
 
         # 🔹 Fetch workflow
         workflow = db.query(Workflow).filter(Workflow.id == task.workflow_id).first()
-        if not workflow:
-            print(f"Error: Workflow {task.workflow_id} not found")
-            return
-
         graph = workflow.graph_json
 
-        if not graph or "nodes" not in graph or len(graph["nodes"]) == 0:
-            print("Error: Invalid workflow graph")
-            return
-
-        # 🔹 Initialize state
+        # 🔥 STATE
         state = {
             "input": task.description,
+            "messages": [],
             "intermediate_outputs": {},
+            "tool_history": [],
             "final_output": None
         }
 
         llm = LLMService()
         builder = StateGraph(dict)
 
-        # 🔹 Node factory
-        def create_node(node):
+        # 🔹 NODE
+        def create_node(node, log):
             def fn(state):
                 node_id = node["id"]
                 agent_id = node["agent_id"]
 
+                log("node_start", "Node started", node_id, agent_id)
+
                 agent = db.query(Agent).filter(Agent.id == agent_id).first()
 
-                if not agent:
-                    state["intermediate_outputs"][node_id] = {
-                        "action": "final_answer",
-                        "output": "Error: Agent not found"
-                    }
-                    return state
-
-                # 🟢 STRONG CONTEXT BUILDER
+                # 🔹 CONTEXT
                 context = ""
                 for n in graph["nodes"]:
                     nid = n["id"]
                     if nid in state["intermediate_outputs"]:
                         prev = state["intermediate_outputs"][nid]
+                        content = prev.get("output", {}).get("content", "")
+                        context += f"\n--- {nid} ---\n{content}\n"
 
-                        if isinstance(prev, dict):
-                            output = prev.get("output")
-
-                            if isinstance(output, dict):
-                                content = json.dumps(output, indent=2)
-                            else:
-                                content = output or str(prev)
-                        else:
-                            content = str(prev)
-
-                        context += f"""
---- OUTPUT FROM {nid} ---
-{content}
-"""
-
-                skills_text = agent.skills if agent.skills else "You are a helpful assistant."
-
-                # 🔴 FINAL PROMPT (STRICT + GROUNDED)
                 prompt = f"""
 You are an AI agent.
 
 ROLE:
-{skills_text}
+{agent.skills}
 
-You MUST respond ONLY in valid JSON.
+Respond ONLY in JSON.
 
 FORMAT:
-
-For final answer:
 {{
   "action": "final_answer",
-  "output": "your answer"
+  "output": {{
+    "content": "...",
+    "metadata": {{}}
+  }}
 }}
 
-For tool usage:
+OR:
 {{
   "action": "tool_call",
   "tool_name": "web_search",
-  "input": "search query"
+  "input": "query"
 }}
 
-AVAILABLE TOOLS:
-- web_search
-
-DECISION RULE:
-- If task requires facts, stats, trends → use web_search
-- If CONTEXT already has sufficient info → DO NOT call tool
-
-CRITICAL INSTRUCTIONS:
-- You MUST use the CONTEXT data explicitly
-- You MUST include at least:
-  • 1 trend
-  • 1 statistic or insight
-- You MUST NOT generate generic content
-- Your answer must clearly reflect the research
-
-BAD OUTPUT:
-"Revolutionize coding with AI..."
-
-GOOD OUTPUT:
-"With AI coding assistants like Copilot and Gemini leading adoption..."
-
-If you ignore context, the answer is incorrect.
-
 TASK:
-{state['input']}
+{state["input"]}
 
-CONTEXT (MANDATORY):
-{context if context else "None"}
+CONTEXT:
+{context}
 """
 
-                # 🔹 FIRST LLM CALL
                 result = llm.generate(prompt)
 
                 try:
@@ -141,131 +113,141 @@ CONTEXT (MANDATORY):
                 except:
                     parsed = {
                         "action": "final_answer",
-                        "output": result
+                        "output": {
+                            "content": result,
+                            "metadata": {}
+                        }
                     }
 
-                print(f"\n[ACTION DECIDED] {parsed.get('action')}")
+                log("llm_decision", parsed.get("action"), node_id, agent_id)
 
-                # 🔥 TOOL EXECUTION + SECOND LLM CALL
+                # 🔥 TOOL
                 if parsed.get("action") == "tool_call":
                     tool_name = parsed.get("tool_name")
                     tool_input = parsed.get("input")
 
-                    print(f"\n[TOOL CALL] {tool_name} -> {tool_input}")
+                    log("tool_call", tool_name, node_id, agent_id)
 
-                    if tool_name in TOOLS:
-                        try:
-                            tool_result = TOOLS[tool_name](tool_input)
-                        except Exception as e:
-                            tool_result = f"Tool execution failed: {str(e)}"
-                    else:
-                        tool_result = f"Tool '{tool_name}' not available"
+                    tool_data = {
+                        "tool_name": tool_name,
+                        "input": tool_input,
+                        "output": None,
+                        "status": "success"
+                    }
 
-                    # 🔹 SECOND LLM CALL (REASONING)
-                    follow_up_prompt = f"""
-You previously called a tool.
+                    try:
+                        result = TOOLS[tool_name](tool_input)
+                        tool_data["output"] = result
+                    except Exception as e:
+                        tool_data["output"] = str(e)
+                        tool_data["status"] = "error"
 
-Tool Name: {tool_name}
-Tool Input: {tool_input}
+                    log("tool_result", tool_data["status"], node_id, agent_id)
 
-Tool Result:
-{tool_result}
+                    state["tool_history"].append(tool_data)
 
-CRITICAL INSTRUCTIONS:
-- Extract useful insights (trends, stats, tools)
-- Do NOT call any tool again
-- Structure your response clearly
-- Use actual data from tool result
+                    follow_up = f"""
+Tool result:
+{json.dumps(tool_data)}
 
-Respond ONLY in JSON:
+Respond in JSON:
 {{
   "action": "final_answer",
   "output": {{
-    "main_takeaways": ["..."],
-    "key_stats": ["..."],
-    "summary": "..."
+    "content": "...",
+    "metadata": {{
+      "tools_used": ["{tool_name}"]
+    }}
   }}
 }}
 """
-
-                    second_result = llm.generate(follow_up_prompt)
+                    result = llm.generate(follow_up)
 
                     try:
-                        parsed = json.loads(second_result)
+                        parsed = json.loads(result)
                     except:
                         parsed = {
                             "action": "final_answer",
-                            "output": second_result
+                            "output": {
+                                "content": result,
+                                "metadata": {}
+                            }
                         }
 
-                # 🔹 NORMALIZE OUTPUT
+                # 🔥 NORMALIZE
                 if parsed.get("action") != "final_answer":
                     parsed = {
                         "action": "final_answer",
-                        "output": parsed.get("output", str(parsed))
+                        "output": {
+                            "content": str(parsed),
+                            "metadata": {}
+                        }
                     }
 
-                # 🔥 FIX DOUBLE JSON ISSUE
-                if isinstance(parsed.get("output"), str):
-                    try:
-                        parsed["output"] = json.loads(parsed["output"])
-                    except:
-                        pass
+                output = parsed.get("output")
 
-                # 🔹 SAVE STATE
+                if isinstance(output, str):
+                    parsed["output"] = {
+                        "content": output,
+                        "metadata": {}
+                    }
+
+                if "metadata" not in parsed["output"]:
+                    parsed["output"]["metadata"] = {}
+
                 state["intermediate_outputs"][node_id] = parsed
 
-                # 🔹 DEBUG PRINT
-                print("\n" + "=" * 30)
-                print(f"NODE {node_id} ({agent.name})")
-                print("=" * 30)
-                print(json.dumps(parsed, indent=2))
+                log(
+                    "output",
+                    parsed["output"]["content"][:100],
+                    node_id,
+                    agent_id
+                )
 
                 return state
 
             return fn
 
-        # 🔹 Add nodes
+        # 🔹 GRAPH BUILD
         for node in graph["nodes"]:
-            builder.add_node(node["id"], create_node(node))
+            builder.add_node(node["id"], create_node(node, log))
 
-        # 🔹 Add edges
         if "edges" in graph:
             for edge in graph["edges"]:
                 builder.add_edge(edge["from"], edge["to"])
 
-        # 🔹 Set entry point
         builder.set_entry_point(graph["nodes"][0]["id"])
 
-        # 🔹 Compile & execute
         app = builder.compile()
         state = app.invoke(state)
 
-        # 🔹 Extract final output
-        executed_nodes = list(state["intermediate_outputs"].keys())
-        last_node = executed_nodes[-1]
+        # 🔥 FINAL OUTPUT
+        last_node = list(state["intermediate_outputs"].keys())[-1]
         final = state["intermediate_outputs"][last_node]
 
-        if isinstance(final, dict):
-            output = final.get("output")
-            if isinstance(output, dict):
-                state["final_output"] = json.dumps(output, indent=2)
-            else:
-                state["final_output"] = output
-        else:
-            state["final_output"] = final
+        state["final_output"] = {
+            "content": final.get("output", {}).get("content", ""),
+            "metadata": final.get("output", {}).get("metadata", {})
+        }
 
-        print("\n" + "=" * 30)
-        print("FINAL OUTPUT")
-        print("=" * 30)
-        print(state["final_output"])
+        log("task_complete", "Task finished")
+
+        task_run.status = "completed"
+        task_run.final_output = json.dumps(state["final_output"])
+        task_run.ended_at = datetime.utcnow()
+
+        db.commit()
 
         return state["final_output"]
 
     except Exception as e:
-        print(f"Error executing task {task_id}: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print("ERROR:", str(e))
+
+        task_run.status = "failed"
+        task_run.final_output = str(e)
+        task_run.ended_at = datetime.utcnow()
+
+        db.commit()
 
     finally:
         db.close()

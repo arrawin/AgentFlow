@@ -51,8 +51,22 @@ class TaskRun(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     task_id = Column(Integer, ForeignKey("tasks.id"))
-    status = Column(String, default="pending")  # pending, running, completed, failed
-    logs = Column(Text, nullable=True)
-    result = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    status = Column(String, default="in_progress")
+    final_output = Column(Text)
+
+    started_at = Column(DateTime(timezone=True), server_default=func.now())
+    ended_at = Column(DateTime)
+
+
+class RunLog(Base):
+    __tablename__ = "run_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    task_run_id = Column(Integer, ForeignKey("task_runs.id"))
+    node_id = Column(String)
+    agent_id = Column(Integer)
+    event_type = Column(String)   
+    message = Column(Text)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
