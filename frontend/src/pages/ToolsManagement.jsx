@@ -6,6 +6,7 @@ const TOOL_METADATA = {
   file_reader: { group: "FILE SYSTEM",   icon: "📄", iconBg: "#dbeafe", desc: "Read full content of an uploaded file" },
   file_search: { group: "FILE SYSTEM",   icon: "🔍", iconBg: "#dbeafe", desc: "Search for lines matching a query in a file" },
   file_lines:  { group: "FILE SYSTEM",   icon: "📋", iconBg: "#dbeafe", desc: "Read specific line ranges from a file" },
+  file_writer: { group: "FILE SYSTEM",   icon: "✏️", iconBg: "#dbeafe", desc: "Write content to a file in the uploads directory" },
 };
 
 export default function ToolsManagement() {
@@ -107,8 +108,9 @@ export default function ToolsManagement() {
             <div style={s.sectionSub}>Toggle tools per agent. Click Save to persist changes.</div>
           </div>
         </div>
-        <div style={s.tableWrap}>
-          <table style={s.table}>
+        <div style={s.tableContainer}>
+          <div style={s.tableWrap}>
+            <table style={s.table}>
             <thead>
               <tr style={s.theadRow}>
                 <th style={s.th}>AGENT</th>
@@ -176,6 +178,10 @@ export default function ToolsManagement() {
               })}
             </tbody>
           </table>
+          </div>
+          {tools.length > 4 && (
+            <div style={s.scrollHint}>← scroll for more tools →</div>
+          )}
         </div>
       </div>
 
@@ -193,6 +199,7 @@ export default function ToolsManagement() {
             <li style={s.infoItem}><span style={s.infoCheck}>✓</span> file_reader — reads uploaded files</li>
             <li style={s.infoItem}><span style={s.infoCheck}>✓</span> file_search — searches within files</li>
             <li style={s.infoItem}><span style={s.infoCheck}>✓</span> file_lines — reads specific line ranges</li>
+            <li style={s.infoItem}><span style={s.infoCheck}>✓</span> file_writer — writes output to a file for download</li>
           </ul>
         </div>
       </div>
@@ -212,9 +219,9 @@ function FileUploadSection() {
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState(null);
 
-  useEffect(() => {
-    api.get("/files").then(r => setFiles(r.data.files || [])).catch(() => {});
-  }, []);
+  const fetchFiles = () => api.get("/files").then(r => setFiles(r.data.files || [])).catch(() => {});
+
+  useEffect(() => { fetchFiles(); }, []);
 
   const handleUpload = async (e) => {
     const file = e.target.files[0];
@@ -225,12 +232,22 @@ function FileUploadSection() {
     try {
       await api.post("/files/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
       setMsg({ text: `✓ ${file.name} uploaded`, ok: true });
-      api.get("/files").then(r => setFiles(r.data.files || []));
+      fetchFiles();
     } catch {
       setMsg({ text: "✗ Upload failed", ok: false });
     } finally {
       setUploading(false);
       e.target.value = "";
+      setTimeout(() => setMsg(null), 3000);
+    }
+  };
+
+  const handleDelete = async (filename) => {
+    try {
+      await api.delete(`/files/${filename}`);
+      fetchFiles();
+    } catch (e) {
+      setMsg({ text: e.response?.data?.detail || "Delete failed", ok: false });
       setTimeout(() => setMsg(null), 3000);
     }
   };
@@ -254,12 +271,38 @@ function FileUploadSection() {
           <div key={f} style={s.fileItem}>
             <span style={s.fileIcon}>📄</span>
             <span style={s.fileName}>{f}</span>
+            <a href={`/api/files/download/${f}`} download={f} style={s.downloadBtn} title="Download">↓</a>
+            <DeleteButton filename={f} onDelete={() => handleDelete(f)} />
           </div>
         ))}
       </div>
     </div>
   );
 }
+
+function DeleteButton({ filename, onDelete }) {
+  const [confirming, setConfirming] = useState(false);
+
+  if (confirming) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <span style={{ fontSize: 11, color: "var(--on-surface-variant)" }}>Delete?</span>
+        <button style={db.yes} onClick={() => { setConfirming(false); onDelete(); }}>Yes</button>
+        <button style={db.no} onClick={() => setConfirming(false)}>No</button>
+      </div>
+    );
+  }
+
+  return (
+    <button style={db.x} onClick={() => setConfirming(true)} title="Delete file">✕</button>
+  );
+}
+
+const db = {
+  x:   { background: "transparent", border: "none", color: "var(--on-surface-variant)", cursor: "pointer", fontSize: 13, padding: "0 4px", opacity: 0.6 },
+  yes: { background: "var(--error-container)", color: "var(--error)", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700, cursor: "pointer" },
+  no:  { background: "var(--surface-container)", color: "var(--on-surface-variant)", border: "none", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 700, cursor: "pointer" },
+};
 
 const s = {
   page: { paddingBottom: 60, position: "relative" },
@@ -281,7 +324,9 @@ const s = {
   matrixHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 },
   sectionTitle: { fontSize: 15, fontWeight: 800, color: "var(--on-surface)", marginBottom: 4 },
   sectionSub: { fontSize: 12, color: "var(--on-surface-variant)" },
+  tableContainer: { position: "relative" },
   tableWrap: { overflowX: "auto" },
+  scrollHint: { textAlign: "center", fontSize: 11, color: "var(--on-surface-variant)", padding: "8px 0 0", opacity: 0.6 },
   table: { width: "100%", borderCollapse: "separate", borderSpacing: 0 },
   theadRow: { background: "var(--surface-container-low)" },
   th: { padding: "10px 14px", fontSize: 10, fontWeight: 800, color: "var(--on-surface-variant)", textTransform: "uppercase", letterSpacing: "0.06em", background: "var(--surface-container-low)", whiteSpace: "nowrap" },
@@ -304,7 +349,9 @@ const s = {
   emptyFiles: { fontSize: 12, color: "var(--on-surface-variant)" },
   fileItem: { display: "flex", alignItems: "center", gap: 8, background: "var(--surface-container-low)", borderRadius: 8, padding: "7px 12px" },
   fileIcon: { fontSize: 13 },
-  fileName: { fontSize: 12, color: "var(--on-surface)" },
+  fileName: { fontSize: 12, color: "var(--on-surface)", flex: 1 },
+  deleteFileBtn: { background: "transparent", border: "none", color: "var(--on-surface-variant)", cursor: "pointer", fontSize: 13, padding: "0 4px", lineHeight: 1, opacity: 0.6 },
+  downloadBtn: { color: "var(--secondary)", fontSize: 14, fontWeight: 700, textDecoration: "none", padding: "0 4px", lineHeight: 1 },
 
   infoCard: { background: "linear-gradient(160deg, #0f172a 0%, #1e1b4b 100%)", borderRadius: 14, padding: 24, color: "#fff" },
   infoIcon: { fontSize: 24, marginBottom: 12 },

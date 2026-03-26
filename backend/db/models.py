@@ -86,6 +86,7 @@ class TaskRun(Base):
     workflow_snapshot = Column(JSON, nullable=True)  # graph_json at time of run
     triggered_by = Column(String, default="manual")  # manual | scheduler
     final_output = Column(Text, nullable=True)
+    generated_files = Column(JSON, default=list, nullable=True)  # files created by agents during run
     started_at = Column(DateTime(timezone=True), server_default=func.now())
     ended_at = Column(DateTime, nullable=True)
 

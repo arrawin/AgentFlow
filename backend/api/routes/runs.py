@@ -25,9 +25,11 @@ def get_runs(db: Session = Depends(get_db)):
             "id": run.id,
             "task_id": run.task_id,
             "status": run.status,
+            "triggered_by": run.triggered_by,
             "started_at": run.started_at,
             "ended_at": run.ended_at,
-            "final_output": run.final_output
+            "final_output": run.final_output,
+            "generated_files": getattr(run, 'generated_files', None) or [],
         }
         for run in runs
     ]

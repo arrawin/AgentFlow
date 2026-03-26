@@ -11,7 +11,6 @@ from api.routes.llm_configs import router as llm_configs_router
 from api.routes.schedules import router as schedules_router
 from api.routes.dashboard import router as dashboard_router
 from api.routes.tools import router as tools_router
-from api.routes.tools import router as tools_router
 
 app = FastAPI(title="Workflow Orchestration API")
 
@@ -35,7 +34,6 @@ app.include_router(files_router, prefix="/api/files", tags=["files"])
 app.include_router(llm_configs_router, prefix="/api", tags=["llm-configs"])
 app.include_router(schedules_router, prefix="/api", tags=["schedules"])
 app.include_router(dashboard_router, prefix="/api", tags=["dashboard"])
-app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])
 
 

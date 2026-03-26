@@ -10,10 +10,11 @@ router = APIRouter()
 
 # Real tools from registry with metadata
 TOOL_METADATA = {
-    "web_search":   {"group": "WEB DISCOVERY",  "desc": "Search the web via Tavily API"},
-    "file_reader":  {"group": "FILE SYSTEM",     "desc": "Read full content of an uploaded file"},
-    "file_search":  {"group": "FILE SYSTEM",     "desc": "Search for lines matching a query in a file"},
-    "file_lines":   {"group": "FILE SYSTEM",     "desc": "Read specific line ranges from a file"},
+    "web_search":  {"group": "WEB DISCOVERY", "desc": "Search the web via Tavily API"},
+    "file_reader": {"group": "FILE SYSTEM",   "desc": "Read full content of an uploaded file"},
+    "file_search": {"group": "FILE SYSTEM",   "desc": "Search for lines matching a query in a file"},
+    "file_lines":  {"group": "FILE SYSTEM",   "desc": "Read specific line ranges from a file"},
+    "file_writer": {"group": "FILE SYSTEM",   "desc": "Write content to a file in the uploads directory"},
 }
 
 

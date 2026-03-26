@@ -36,3 +36,27 @@ async def upload_file(file: UploadFile = File(...)):
 def list_files():
     files = os.listdir(UPLOAD_DIR) if os.path.exists(UPLOAD_DIR) else []
     return {"files": sorted(files)}
+
+
+@router.delete("/{filename}")
+def delete_file(filename: str):
+    from tools.utils import safe_path
+    try:
+        path = safe_path(filename)
+        os.remove(path)
+        return {"message": f"File '{filename}' deleted"}
+    except Exception as e:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/download/{filename}")
+def download_file(filename: str):
+    from tools.utils import safe_path
+    from fastapi.responses import FileResponse
+    from fastapi import HTTPException
+    try:
+        path = safe_path(filename)
+        return FileResponse(path, filename=filename, media_type="application/octet-stream")
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=str(e))

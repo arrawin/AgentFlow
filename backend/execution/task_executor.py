@@ -103,35 +103,70 @@ def run_task(task_id: int):
                     context += f"--- {k} output ---\n{v}\n\n"
 
                 skills_text = agent.skills if agent.skills else "No specific skills"
-                tool_list = list(TOOLS.keys())
+
+                # Respect agent's allowed_tools; fall back to all tools if none set
+                all_tool_keys = list(TOOLS.keys())
+                if agent.allowed_tools and len(agent.allowed_tools) > 0:
+                    tool_list = [t for t in agent.allowed_tools if t in TOOLS]
+                else:
+                    tool_list = all_tool_keys
 
                 available_files = os.listdir(UPLOAD_DIR) if os.path.exists(UPLOAD_DIR) else []
                 files_text = "\n".join([f"- {f}" for f in available_files]) or "No files available"
 
-                max_iterations = 5
+                # Track files created during this node's execution
+                files_before = set(available_files)
+
+                max_iterations = 8
                 iteration = 0
                 agent_result = ""
+                has_written_file = False
+
+                tool_usage_docs = """TOOL USAGE — respond with ONLY this JSON (no extra text before or after):
+{"action": "tool_call", "tool_name": "<tool_name>", "input": <input_object>}
+
+INPUT FORMATS PER TOOL:"""
+                if "web_search" in tool_list:
+                    tool_usage_docs += '\n- web_search:  {"query": "<search_term>"}'
+                if "file_reader" in tool_list:
+                    tool_usage_docs += '\n- file_reader: {"filename": "<filename>"}'
+                if "file_search" in tool_list:
+                    tool_usage_docs += '\n- file_search: {"filename": "<filename>", "query": "<search_term>"}'
+                if "file_lines" in tool_list:
+                    tool_usage_docs += '\n- file_lines:  {"filename": "<filename>", "start": <line_num>, "end": <line_num>}'
+                if "file_writer" in tool_list:
+                    tool_usage_docs += '\n- file_writer: {"filename": "<output_filename>", "content": "<full_text_content>"}'
+                    tool_usage_docs += '\n  IMPORTANT: If the task asks you to write/create/save a file, you MUST call file_writer with the content. Use markdown tables, plain text, or any format appropriate for the request.'
 
                 while iteration < max_iterations:
                     iteration += 1
 
                     if agent_result or context:
-                        if agent_result:
-                            instruction = "You have tool results above. Write your FINAL ANSWER as plain text now. Do NOT call any more tools."
+                        if agent_result and has_written_file:
+                            # Already wrote a file — wrap up
+                            instruction = "You have written a file successfully. Write your FINAL ANSWER as plain text now summarizing what you did and the filename. Do NOT call any more tools."
+                        elif agent_result:
+                            # Has tool results — allow file_writer if task needs it
+                            if "file_writer" in tool_list:
+                                instruction = f"""You have tool results above.
+If the task requires writing/creating/saving output to a file, call file_writer now:
+{{"action": "tool_call", "tool_name": "file_writer", "input": {{"filename": "<output_filename>", "content": "<full_content>"}}}}
+If you still need more information, you may call another tool.
+Otherwise, write your FINAL ANSWER as plain text now.
+Available tools: {tool_list}"""
+                            else:
+                                instruction = "You have tool results above. Write your FINAL ANSWER as plain text now. Do NOT call any more tools."
                         else:
                             instruction = f"""You have context from previous agents above.
 If you need more information, call a tool using ONLY this JSON (no extra text):
-{{"action": "tool_call", "tool_name": "<tool_name>", "input": {{"query": "<search_term>"}}}}
+{{"action": "tool_call", "tool_name": "<tool_name>", "input": <input_object>}}
 Available tools: {tool_list}
 Otherwise, write your FINAL ANSWER as plain text using the context provided."""
                     else:
-                        instruction = f"""Available tools: {tool_list}
-To call a tool respond with ONLY this JSON (no extra text):
-{{"action": "tool_call", "tool_name": "<tool_name>", "input": {{"query": "<search_term>"}}}}
-- For web_search: {{"query": "<search_term>"}}
-- For file_reader: {{"filename": "<filename>"}}
-- For file_search: {{"filename": "<filename>", "query": "<search_term>"}}
-- Do NOT add any text before or after the JSON."""
+                        instruction = f"""{tool_usage_docs}
+
+Available tools: {tool_list}
+Do NOT add any text before or after the JSON when calling a tool."""
 
                     prompt = f"""You are: {agent.name}
 {skills_text}
@@ -151,7 +186,9 @@ AVAILABLE FILES:
 RULES:
 - Do NOT call the same tool with same input twice
 - If a tool fails, correct your input
-- Only use files from AVAILABLE FILES
+- Only use files from AVAILABLE FILES for reading
+- If the task asks to create/write/save a file, you MUST use file_writer tool
+- For file_writer, include the COMPLETE content in your tool call
 
 {instruction}
 """
@@ -198,6 +235,13 @@ RULES:
 
                         log(node_id, agent.id, "tool_call", f"{tool_name} | {tool_input}")
 
+                        # Enforce allowed_tools
+                        if tool_name not in tool_list:
+                            tool_result = f"Error: Tool '{tool_name}' is not in your allowed tools. Available: {tool_list}"
+                            log(node_id, agent.id, "tool_blocked", tool_result)
+                            agent_result += f"\n\nTool '{tool_name}' result:\n{tool_result}\n"
+                            continue
+
                         allowed, reason = should_execute_tool(state, tool_name, tool_input)
                         if not allowed:
                             tool_result = f"Blocked: {reason}"
@@ -208,6 +252,9 @@ RULES:
                             else:
                                 try:
                                     tool_result = tool_fn(tool_input)
+                                    # Track if file_writer was used successfully
+                                    if tool_name == "file_writer" and "successfully" in str(tool_result):
+                                        has_written_file = True
                                 except Exception as e:
                                     tool_result = f"Tool execution failed: {str(e)}"
 
@@ -226,6 +273,17 @@ RULES:
 
                 if iteration >= max_iterations:
                     agent_result = f"Max iterations reached. Last result: {agent_result}"
+
+                # Detect any files created during this node's execution
+                files_after = set(os.listdir(UPLOAD_DIR)) if os.path.exists(UPLOAD_DIR) else set()
+                new_files = files_after - files_before
+                if new_files:
+                    file_list_str = ", ".join(new_files)
+                    agent_result += f"\n\n[GENERATED FILES: {file_list_str}]"
+                    # Store generated files in state for downstream use
+                    if "generated_files" not in state:
+                        state["generated_files"] = []
+                    state["generated_files"].extend(list(new_files))
 
                 state["intermediate_outputs"][node_id] = agent_result
                 log(node_id, agent.id, "output", agent_result[:1000])
@@ -253,6 +311,14 @@ RULES:
 
         last_node = graph["nodes"][-1]["id"]
         final_output = state["intermediate_outputs"].get(last_node, "")
+
+        # Store generated files list on the run (safe — won't crash if column missing)
+        generated_files = state.get("generated_files", [])
+        if generated_files:
+            try:
+                task_run.generated_files = generated_files
+            except Exception:
+                pass  # Column may not exist yet; files are still on disk
 
         task_run.status = "completed"
         task_run.final_output = final_output
