@@ -1,0 +1,17 @@
+This is a sample document about various topics.
+
+AI is transforming the way we work and live.
+Machine learning models are getting smarter every day.
+The future of AI looks very promising for businesses.
+Deep learning has revolutionized computer vision tasks.
+
+Some non-AI lines:
+The weather today is sunny and warm.
+I enjoy reading books on weekends.
+Coffee is a popular morning beverage.
+
+More AI content:
+AI-powered tools are helping developers write better code.
+Natural language processing enables machines to understand text.
+AI ethics is becoming increasingly important in tech.
+Generative AI models can create images, text, and music.

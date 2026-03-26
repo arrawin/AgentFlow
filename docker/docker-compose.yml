@@ -18,6 +18,8 @@ services:
       - redis
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     working_dir: /app
+    volumes:
+      - uploads_data:/app/uploads
 
   celery:
     build:
@@ -29,3 +31,8 @@ services:
     depends_on:
       - redis
     working_dir: /app
+    volumes:
+      - uploads_data:/app/uploads
+
+volumes:
+  uploads_data:

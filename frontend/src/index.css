@@ -1,58 +1,173 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@700;800&display=swap');
+
+/* ─── Color Tokens (Light Theme) ─── */
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+  --background:                 #f4f6fb;
+  --surface-bright:             #ffffff;
+  --surface-container:          #eef1f8;
+  --surface-container-low:      #f0f3fa;
+  --surface-container-high:     #e4e8f4;
+  --surface-container-lowest:   #f8faff;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
+  --primary:                    #4338ca;
+  --primary-container:          #4f46e5;
+  --on-primary:                 #ffffff;
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
+  --secondary:                  #4f46e5;
+  --secondary-container:        #ede9fe;
+  --on-secondary-container:     #3730a3;
+
+  --tertiary:                   #059669;
+  --tertiary-container:         #d1fae5;
+  --on-tertiary-container:      #065f46;
+
+  --error:                      #dc2626;
+  --error-container:            #fee2e2;
+
+  --on-surface:                 #0f172a;
+  --on-surface-variant:         #64748b;
+
+  --outline:                    #e2e8f0;
+  --outline-variant:            #cbd5e1;
+
+  --shadow-sm:                  0 1px 3px rgba(15,23,42,0.08);
+  --shadow-md:                  0 4px 16px rgba(15,23,42,0.10);
+  --shadow-lg:                  0 8px 32px rgba(15,23,42,0.12);
+  --ambient-shadow:             0 1px 4px rgba(15,23,42,0.06), 0 2px 8px rgba(15,23,42,0.04);
+}
+
+/* ─── Reset ─── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 14px; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--background);
+  color: var(--on-surface);
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--outline-variant); border-radius: 99px; }
 
-a:hover {
-  color: #535bf2;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
+/* ─── Form Elements ─── */
+input, select, textarea {
   font-family: inherit;
-  background-color: #1a1a1a;
+  font-size: 13px;
+  background: var(--surface-bright);
+  border: 1px solid var(--outline);
+  border-radius: 10px;
+  color: var(--on-surface);
+  padding: 10px 14px;
+  outline: none;
+  transition: border-color 150ms, box-shadow 150ms;
+  width: 100%;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--secondary);
+  box-shadow: 0 0 0 3px rgba(79,70,229,0.08);
+}
+
+input::placeholder, textarea::placeholder {
+  color: var(--on-surface-variant);
+  opacity: 0.6;
+}
+
+/* ─── Buttons ─── */
+button {
+  font-family: inherit;
+  font-size: 13px;
   cursor: pointer;
-  transition: border-color 0.25s;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-weight: 600;
+  transition: opacity 150ms, background 150ms, box-shadow 150ms;
 }
 
-button:hover {
-  border-color: #646cff;
+button:hover { opacity: 0.88; }
+
+/* ─── Tables ─── */
+table { width: 100%; border-collapse: separate; border-spacing: 0; }
+
+th {
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--on-surface-variant);
+  border-bottom: 1px solid var(--outline);
+  background: var(--surface-container-low);
 }
 
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+td {
+  padding: 12px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--outline);
+  color: var(--on-surface);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--surface-container-low); }
+
+/* ─── Utility Button Classes ─── */
+.btn-primary {
+  background: var(--secondary);
+  color: #fff;
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-weight: 700;
+  border: none;
+  box-shadow: 0 2px 8px rgba(79,70,229,0.2);
+}
+
+.btn-secondary {
+  background: var(--surface-bright);
+  color: var(--on-surface);
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-weight: 600;
+  border: 1px solid var(--outline);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--on-surface-variant);
+  padding: 9px 18px;
+  border-radius: 8px;
+  font-weight: 600;
+  border: none;
+}
+
+/* ─── Status Pills ─── */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.status-success  { background: var(--tertiary-container);   color: var(--on-tertiary-container); }
+.status-failed   { background: var(--error-container);      color: var(--error); }
+.status-pending  { background: var(--secondary-container);  color: var(--on-secondary-container); }
+.status-neutral  { background: var(--surface-container);    color: var(--on-surface-variant); }
+
+/* ─── Animation ─── */
+.animate-up {
+  animation: slideUp 200ms ease forwards;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }

@@ -4,7 +4,16 @@ import os
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
 
-def tavily_search(query: str):
+def web_search(input_data):
+    # Accept both string and dict input
+    if isinstance(input_data, dict):
+        query = input_data.get("query") or input_data.get("search_query") or input_data.get("q") or str(input_data)
+    else:
+        query = str(input_data)
+
+    if not query:
+        return "Error: query is required for web_search"
+
     url = "https://api.tavily.com/search"
 
     payload = {
@@ -18,16 +27,14 @@ def tavily_search(query: str):
     response = requests.post(url, json=payload)
 
     if response.status_code != 200:
-       print("TAVILY ERROR RESPONSE:", response.text)
-       return f"Error: Tavily API failed ({response.status_code})"
+        print("TAVILY ERROR RESPONSE:", response.text)
+        return f"Error: Tavily API failed ({response.status_code})"
 
     data = response.json()
 
-    # Extract useful info
     results = data.get("results", [])
 
     formatted = []
-
     for r in results:
         title = r.get("title", "")
         content = r.get("content", "")

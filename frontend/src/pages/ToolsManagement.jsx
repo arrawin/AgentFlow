@@ -1,0 +1,323 @@
+import { useEffect, useState } from "react";
+import api from "../api/client";
+
+const TOOL_METADATA = {
+  web_search:  { group: "WEB DISCOVERY", icon: "🌐", iconBg: "#d1fae5", desc: "Search the web via Tavily API" },
+  file_reader: { group: "FILE SYSTEM",   icon: "📄", iconBg: "#dbeafe", desc: "Read full content of an uploaded file" },
+  file_search: { group: "FILE SYSTEM",   icon: "🔍", iconBg: "#dbeafe", desc: "Search for lines matching a query in a file" },
+  file_lines:  { group: "FILE SYSTEM",   icon: "📋", iconBg: "#dbeafe", desc: "Read specific line ranges from a file" },
+};
+
+export default function ToolsManagement() {
+  const [agents, setAgents] = useState([]);
+  const [tools, setTools] = useState([]);
+  const [permissions, setPermissions] = useState({});  // { agentId: Set of tool keys }
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState(null); // { msg, ok }
+  const [saving, setSaving] = useState(null); // agentId being saved
+
+  useEffect(() => {
+    Promise.all([api.get("/agents"), api.get("/tools")])
+      .then(([agentsRes, toolsRes]) => {
+        setAgents(agentsRes.data);
+        setTools(toolsRes.data);
+        // Init permissions from agent.allowed_tools
+        const perms = {};
+        agentsRes.data.forEach(a => {
+          perms[a.id] = new Set(a.allowed_tools || []);
+        });
+        setPermissions(perms);
+        setLoading(false);
+      })
+      .catch(console.error);
+  }, []);
+
+  const toggleTool = (agentId, toolKey) => {
+    setPermissions(prev => {
+      const updated = new Set(prev[agentId] || []);
+      if (updated.has(toolKey)) updated.delete(toolKey);
+      else updated.add(toolKey);
+      return { ...prev, [agentId]: updated };
+    });
+  };
+
+  const saveTools = async (agentId) => {
+    setSaving(agentId);
+    try {
+      const allowed = Array.from(permissions[agentId] || []);
+      await api.put(`/agents/${agentId}/tools`, { allowed_tools: allowed });
+      showToast(`Tools saved for ${agents.find(a => a.id === agentId)?.name}`, true);
+    } catch (e) {
+      showToast(e.response?.data?.detail || "Error saving tools", false);
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const showToast = (msg, ok) => {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // Group tools by category
+  const grouped = tools.reduce((acc, t) => {
+    const g = TOOL_METADATA[t.key]?.group || "OTHER";
+    if (!acc[g]) acc[g] = [];
+    acc[g].push(t);
+    return acc;
+  }, {});
+
+  return (
+    <div className="animate-up" style={s.page}>
+      {/* Header */}
+      <div style={s.pageHeader}>
+        <div>
+          <h1 style={s.pageTitle}>Tools Management</h1>
+          <p style={s.pageSub}>Configure which tools each agent can access during task execution.</p>
+        </div>
+      </div>
+
+      {/* Tool Category Cards */}
+      <div style={s.categoryGrid}>
+        {Object.entries(grouped).map(([group, groupTools]) => (
+          <div key={group} style={s.categoryCard}>
+            <div style={s.catCardTop}>
+              <div style={{ ...s.catIconWrap, background: TOOL_METADATA[groupTools[0]?.key]?.iconBg || "#f3f4f6" }}>
+                {TOOL_METADATA[groupTools[0]?.key]?.icon || "🔧"}
+              </div>
+              <span style={s.catBadge}>{group}</span>
+            </div>
+            <div style={s.catToolList}>
+              {groupTools.map(t => (
+                <div key={t.key} style={s.catToolRow}>
+                  <span style={s.catToolName}>{t.key}</span>
+                  <span style={s.catToolDesc}>{TOOL_METADATA[t.key]?.desc || ""}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Agents Tool Matrix */}
+      <div style={s.matrixSection}>
+        <div style={s.matrixHeader}>
+          <div>
+            <div style={s.sectionTitle}>Agent Tool Permissions</div>
+            <div style={s.sectionSub}>Toggle tools per agent. Click Save to persist changes.</div>
+          </div>
+        </div>
+        <div style={s.tableWrap}>
+          <table style={s.table}>
+            <thead>
+              <tr style={s.theadRow}>
+                <th style={s.th}>AGENT</th>
+                {tools.map(t => (
+                  <th key={t.key} style={{ ...s.th, textAlign: "center" }}>{t.key}</th>
+                ))}
+                <th style={{ ...s.th, textAlign: "center" }}>STATUS</th>
+                <th style={{ ...s.th, textAlign: "center" }}>SAVE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={tools.length + 3} style={s.emptyTd}>Loading agents...</td></tr>
+              ) : agents.length === 0 ? (
+                <tr><td colSpan={tools.length + 3} style={s.emptyTd}>No agents found. Create agents first.</td></tr>
+              ) : agents.map(agent => {
+                const agentTools = permissions[agent.id] || new Set();
+                const hasAny = agentTools.size > 0;
+                return (
+                  <tr key={agent.id} style={s.tr}>
+                    <td style={s.agentCell}>
+                      <div style={s.agentDot}>{agent.name[0]}</div>
+                      <div>
+                        <div style={s.agentName}>{agent.name}</div>
+                        <div style={s.agentMeta}>{agent.is_system ? "System" : "Custom"}</div>
+                      </div>
+                    </td>
+                    {tools.map(t => (
+                      <td key={t.key} style={{ textAlign: "center", padding: "12px 14px" }}>
+                        <button style={s.permToggle} onClick={() => toggleTool(agent.id, t.key)}>
+                          <div style={{
+                            ...s.permDot,
+                            background: agentTools.has(t.key) ? "var(--tertiary)" : "transparent",
+                            border: agentTools.has(t.key) ? "none" : "2px solid var(--outline-variant)",
+                          }}>
+                            {agentTools.has(t.key) && (
+                              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                          </div>
+                        </button>
+                      </td>
+                    ))}
+                    <td style={{ textAlign: "center", padding: "12px 14px" }}>
+                      <span style={{
+                        ...s.statusPill,
+                        background: hasAny ? "#dcfce7" : "#f3f4f6",
+                        color: hasAny ? "#15803d" : "#6b7280",
+                      }}>
+                        {hasAny ? `${agentTools.size} TOOLS` : "NO TOOLS"}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: "center", padding: "12px 14px" }}>
+                      <button
+                        style={{ ...s.saveBtn, opacity: saving === agent.id ? 0.6 : 1 }}
+                        onClick={() => saveTools(agent.id)}
+                        disabled={saving === agent.id}
+                      >
+                        {saving === agent.id ? "..." : "Save"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Bottom: File Upload + Info */}
+      <div style={s.bottomRow}>
+        <FileUploadSection />
+        <div style={s.infoCard}>
+          <div style={s.infoIcon}>🔧</div>
+          <div style={s.infoTitle}>How Tools Work</div>
+          <p style={s.infoText}>
+            Tools extend what agents can do during task execution. Assign tools to agents based on what they need to complete their tasks.
+          </p>
+          <ul style={s.infoList}>
+            <li style={s.infoItem}><span style={s.infoCheck}>✓</span> web_search — searches the internet via Tavily</li>
+            <li style={s.infoItem}><span style={s.infoCheck}>✓</span> file_reader — reads uploaded files</li>
+            <li style={s.infoItem}><span style={s.infoCheck}>✓</span> file_search — searches within files</li>
+            <li style={s.infoItem}><span style={s.infoCheck}>✓</span> file_lines — reads specific line ranges</li>
+          </ul>
+        </div>
+      </div>
+
+      {/* Toast */}
+      {toast && (
+        <div style={{ ...s.toast, background: toast.ok ? "#dcfce7" : "#fee2e2", color: toast.ok ? "#15803d" : "#dc2626", border: `1px solid ${toast.ok ? "#86efac" : "#fca5a5"}` }}>
+          {toast.ok ? "✓" : "✗"} {toast.msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FileUploadSection() {
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    api.get("/files").then(r => setFiles(r.data.files || [])).catch(() => {});
+  }, []);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploading(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    try {
+      await api.post("/files/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      setMsg({ text: `✓ ${file.name} uploaded`, ok: true });
+      api.get("/files").then(r => setFiles(r.data.files || []));
+    } catch {
+      setMsg({ text: "✗ Upload failed", ok: false });
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+      setTimeout(() => setMsg(null), 3000);
+    }
+  };
+
+  return (
+    <div style={s.uploadSection}>
+      <div style={s.sectionTitle}>Uploaded Files</div>
+      <div style={s.sectionSub}>Files here are accessible to agents via file tools during task execution.</div>
+
+      <label style={s.uploadBtn}>
+        {uploading ? "Uploading..." : "+ Upload File"}
+        <input type="file" style={{ display: "none" }} onChange={handleUpload} disabled={uploading} />
+      </label>
+
+      {msg && <div style={{ fontSize: 12, marginTop: 8, color: msg.ok ? "#15803d" : "#dc2626" }}>{msg.text}</div>}
+
+      <div style={s.fileList}>
+        {files.length === 0 ? (
+          <div style={s.emptyFiles}>No files uploaded yet.</div>
+        ) : files.map(f => (
+          <div key={f} style={s.fileItem}>
+            <span style={s.fileIcon}>📄</span>
+            <span style={s.fileName}>{f}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const s = {
+  page: { paddingBottom: 60, position: "relative" },
+  pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 32 },
+  pageTitle: { fontSize: 26, fontWeight: 800, color: "var(--on-surface)", marginBottom: 6 },
+  pageSub: { fontSize: 13, color: "var(--on-surface-variant)" },
+
+  categoryGrid: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 28 },
+  categoryCard: { background: "var(--surface-bright)", borderRadius: 14, padding: 20, boxShadow: "var(--ambient-shadow)" },
+  catCardTop: { display: "flex", alignItems: "center", gap: 12, marginBottom: 14 },
+  catIconWrap: { width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 },
+  catBadge: { fontSize: 11, fontWeight: 800, color: "var(--on-surface)", letterSpacing: "0.04em" },
+  catToolList: { display: "flex", flexDirection: "column", gap: 8 },
+  catToolRow: { display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", background: "var(--surface-container-low)", borderRadius: 8 },
+  catToolName: { fontSize: 12, fontWeight: 700, color: "var(--on-surface)", minWidth: 100 },
+  catToolDesc: { fontSize: 11, color: "var(--on-surface-variant)" },
+
+  matrixSection: { background: "var(--surface-bright)", borderRadius: 14, padding: 24, boxShadow: "var(--ambient-shadow)", marginBottom: 28 },
+  matrixHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 },
+  sectionTitle: { fontSize: 15, fontWeight: 800, color: "var(--on-surface)", marginBottom: 4 },
+  sectionSub: { fontSize: 12, color: "var(--on-surface-variant)" },
+  tableWrap: { overflowX: "auto" },
+  table: { width: "100%", borderCollapse: "separate", borderSpacing: 0 },
+  theadRow: { background: "var(--surface-container-low)" },
+  th: { padding: "10px 14px", fontSize: 10, fontWeight: 800, color: "var(--on-surface-variant)", textTransform: "uppercase", letterSpacing: "0.06em", background: "var(--surface-container-low)", whiteSpace: "nowrap" },
+  tr: { transition: "background 100ms" },
+  agentCell: { display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", minWidth: 160 },
+  agentDot: { width: 30, height: 30, borderRadius: 8, background: "var(--secondary-container)", color: "var(--on-secondary-container)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, flexShrink: 0 },
+  agentName: { fontSize: 13, fontWeight: 700, color: "var(--on-surface)" },
+  agentMeta: { fontSize: 10, color: "var(--on-surface-variant)", marginTop: 1 },
+  permToggle: { background: "none", border: "none", padding: 0, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
+  permDot: { width: 18, height: 18, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" },
+  statusPill: { fontSize: 9, fontWeight: 800, padding: "3px 8px", borderRadius: 6, letterSpacing: "0.04em" },
+  saveBtn: { background: "var(--secondary)", color: "#fff", border: "none", borderRadius: 6, padding: "5px 14px", fontSize: 11, fontWeight: 700, cursor: "pointer" },
+  emptyTd: { padding: 40, textAlign: "center", color: "var(--on-surface-variant)" },
+
+  bottomRow: { display: "grid", gridTemplateColumns: "1fr 320px", gap: 24 },
+
+  uploadSection: { background: "var(--surface-bright)", borderRadius: 14, padding: 24, boxShadow: "var(--ambient-shadow)" },
+  uploadBtn: { display: "inline-block", background: "var(--secondary)", color: "#fff", borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 12, fontWeight: 700, marginTop: 14, marginBottom: 4 },
+  fileList: { marginTop: 14, display: "flex", flexDirection: "column", gap: 6 },
+  emptyFiles: { fontSize: 12, color: "var(--on-surface-variant)" },
+  fileItem: { display: "flex", alignItems: "center", gap: 8, background: "var(--surface-container-low)", borderRadius: 8, padding: "7px 12px" },
+  fileIcon: { fontSize: 13 },
+  fileName: { fontSize: 12, color: "var(--on-surface)" },
+
+  infoCard: { background: "linear-gradient(160deg, #0f172a 0%, #1e1b4b 100%)", borderRadius: 14, padding: 24, color: "#fff" },
+  infoIcon: { fontSize: 24, marginBottom: 12 },
+  infoTitle: { fontSize: 15, fontWeight: 800, marginBottom: 10 },
+  infoText: { fontSize: 12, color: "rgba(255,255,255,0.65)", lineHeight: 1.6, marginBottom: 16 },
+  infoList: { listStyle: "none", display: "flex", flexDirection: "column", gap: 8 },
+  infoItem: { fontSize: 12, color: "rgba(255,255,255,0.8)", display: "flex", alignItems: "flex-start", gap: 8 },
+  infoCheck: { color: "#34d399", fontWeight: 800, flexShrink: 0 },
+
+  toast: {
+    position: "fixed", bottom: 24, right: 24,
+    padding: "10px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600,
+    boxShadow: "var(--shadow-md)", zIndex: 999,
+    animation: "slideUp 200ms ease",
+  },
+};

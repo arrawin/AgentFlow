@@ -4,17 +4,17 @@ from sqlalchemy import pool
 from alembic import context
 import os
 import sys
+
+# Load .env from project root (one level up from backend/)
 from dotenv import load_dotenv
-import os
+load_dotenv(os.path.join(os.path.dirname(__file__), '..', '..', '..', '.env'))
 
-load_dotenv()
-
-# Add parent directory to path for imports
+# Add backend directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-# Import your models and Base
+# Import ALL models so autogenerate detects them
 from db.database import Base
-from db.models import Domain, Agent, LLMConfig, Workflow, Task
+from db.models import Domain, Agent, LLMConfig, Workflow, Task, Schedule, TaskRun, RunLog
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
