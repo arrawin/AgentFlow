@@ -23,8 +23,9 @@ export default function CreateAgent() {
   useEffect(() => {
     api.get("/domains").then(r => {
       setDomains(r.data);
-      if (!isEdit && r.data.length > 0) {
-        setForm(f => ({ ...f, domain_id: String(r.data[0].id) }));
+      if (!isEdit) {
+        const first = r.data.find(d => d.name !== "SYSTEM");
+        if (first) setForm(f => ({ ...f, domain_id: String(first.id) }));
       }
     }).catch(console.error);
     api.get("/llm-configs").then(r => setLlmConfigs(r.data)).catch(console.error);
@@ -99,7 +100,7 @@ export default function CreateAgent() {
         <div style={s.leftCol}>
           <div style={s.sectionLabel}>AGENT DOMAIN</div>
           <div style={s.domainList}>
-            {domains.map((d, i) => (
+            {domains.filter(d => d.name !== "SYSTEM").map((d, i) => (
               <div
                 key={d.id}
                 style={{ ...s.domainItem, ...(form.domain_id === String(d.id) ? s.domainItemActive : {}) }}
@@ -140,7 +141,7 @@ export default function CreateAgent() {
                   onChange={e => setForm(f => ({ ...f, domain_id: e.target.value }))}
                 >
                   <option value="">Select domain</option>
-                  {domains.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  {domains.filter(d => d.name !== "SYSTEM").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
             </div>

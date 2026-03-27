@@ -3,218 +3,393 @@ import api from "../api/client";
 import { getSchedules, createSchedule, updateSchedule, deleteSchedule } from "../api/schedules";
 import { getTasks } from "../api/tasks";
 
+const CRON_PRESETS = [
+  { label: "Every day at 9 AM",     value: "0 9 * * *" },
+  { label: "Every hour",            value: "0 * * * *" },
+  { label: "Every 5 minutes",       value: "*/5 * * * *" },
+  { label: "Every day at midnight", value: "0 0 * * *" },
+  { label: "Every Monday 9 AM",     value: "0 9 * * 1" },
+  { label: "Custom",                value: "" },
+];
+
+function cronHuman(expr) {
+  if (!expr) return "—";
+  const match = CRON_PRESETS.find(p => p.value === expr);
+  return match?.value ? match.label : expr;
+}
+
+const EMPTY_FORM = { name: "", trigger_type: "cron", cron_expression: "0 9 * * *", task_ids: [], enabled: true };
+
+const TRIGGER_ICONS = {
+  cron: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+  ),
+  email: (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+  ),
+};
+
 export default function Scheduler() {
   const [schedules, setSchedules] = useState([]);
   const [tasks, setTasks] = useState([]);
-  const [stats, setStats] = useState(null);
+  const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState(null);
+  const [customCron, setCustomCron] = useState(false);
 
-  useEffect(() => {
-    Promise.all([getSchedules(), getTasks(), api.get("/dashboard")]).then(([s, t, d]) => {
+  const load = () =>
+    Promise.all([getSchedules(), getTasks(), api.get("/runs")]).then(([s, t, r]) => {
       setSchedules(s);
       setTasks(t);
-      setStats(d.data);
+      setRuns(r.data.slice(0, 20));
       setLoading(false);
-    }).catch(console.error);
-  }, []);
+    });
+
+  useEffect(() => { load(); }, []);
+
+  const showToast = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3000); };
+
+  const openCreate = () => { setForm(EMPTY_FORM); setEditId(null); setCustomCron(false); setError(""); setShowForm(true); };
+  const openEdit = (sc) => {
+    setForm({ name: sc.name, trigger_type: sc.trigger_type, cron_expression: sc.cron_expression || "0 9 * * *", task_ids: sc.task_ids || [], enabled: sc.enabled });
+    setEditId(sc.id); setCustomCron(!CRON_PRESETS.find(p => p.value === sc.cron_expression)); setError(""); setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name.trim()) { setError("Name is required"); return; }
+    if (form.trigger_type === "cron" && !form.cron_expression.trim()) { setError("Cron expression is required"); return; }
+    setSaving(true); setError("");
+    try {
+      if (editId) { await updateSchedule(editId, form); showToast("Schedule updated"); }
+      else { await createSchedule(form); showToast("Schedule created"); }
+      setShowForm(false); load();
+    } catch (e) { setError(e.response?.data?.detail || "Error saving schedule"); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!confirm("Delete this schedule?")) return;
+    await deleteSchedule(id); showToast("Schedule deleted"); load();
+  };
+
+  const handleToggle = async (sc) => { await updateSchedule(sc.id, { enabled: !sc.enabled }); load(); };
+  const toggleTask = (taskId) => setForm(f => ({ ...f, task_ids: f.task_ids.includes(taskId) ? f.task_ids.filter(id => id !== taskId) : [...f.task_ids, taskId] }));
+
+  const getTaskName = (id) => tasks.find(t => t.id === id)?.name || `Task #${id}`;
+
+  // Stats
+  const enabled = schedules.filter(s => s.enabled).length;
+  const successRuns = runs.filter(r => r.status === "completed").length;
+  const failedRuns = runs.filter(r => r.status === "failed").length;
+  const scheduledRuns = runs.filter(r => r.triggered_by === "scheduler");
 
   return (
-    <div className="animate-up" style={s.container}>
-      {/* Page Header */}
-      <div style={s.header}>
-        <div style={s.headerRow}>
-          <div>
-            <h1 style={s.title}>Task Scheduler</h1>
-            <p style={s.subtitle}>Configure automated execution triggers for long-running AI workflows.</p>
-          </div>
-          <div style={s.actions}>
-             <button className="btn-secondary">Pause All</button>
-             <button className="btn-primary">+ Add Trigger</button>
-          </div>
+    <div className="animate-up" style={s.page}>
+      {/* Header */}
+      <div style={s.pageHeader}>
+        <div>
+          <h1 style={s.pageTitle}>Task Scheduler</h1>
+          <p style={s.pageSub}>Orchestrate your autonomous workforce. Manage recurring triggers and monitor execution in real-time.</p>
+        </div>
+        <div style={s.headerActions}>
+          <button style={s.exportBtn}>↑ Export Logs</button>
+          <button className="btn-primary" style={s.newBtn} onClick={openCreate}>+ New Schedule</button>
         </div>
       </div>
 
-      {/* Stats Row */}
-      <div style={s.statsGrid}>
-        <SchedStat label="Total Active" value={schedules.length || "0"} subLabel={`${schedules.filter(s => s.enabled).length} Enabled`} />
-        <SchedStat label="Tasks" value={tasks.length || "0"} subLabel="Configured Workflows" />
-        <SchedStat label="Last Run" value={stats?.recent_runs?.[0] ? new Date(stats.recent_runs[0].started_at).toLocaleTimeString() : "N/A"} subLabel={stats?.recent_runs?.[0] ? `Task #${stats.recent_runs[0].task_id}` : "No runs yet"} />
-        <SchedStat label="Run Status" value={stats?.recent_runs?.[0]?.status || "Idle"} subLabel="System Monitor" />
+      {/* Stat Cards */}
+      <div style={s.statsRow}>
+        <StatCard icon="⚡" iconBg="#fef9c3" iconColor="#ca8a04" label="ACTIVE TRIGGERS" value={enabled} trend={`${schedules.length} total`} />
+        <StatCard icon="✓" iconBg="#dcfce7" iconColor="#16a34a" label="SUCCESSFUL RUNS" value={successRuns} trend="Steady" trendOk />
+        <StatCard icon="◉" iconBg="#eff6ff" iconColor="#3b82f6" label="SCHEDULED RUNS" value={scheduledRuns.length} trend="Queued" />
+        <StatCard icon="▲" iconBg="#fef2f2" iconColor="#ef4444" label="FAILED ATTEMPTS" value={failedRuns} trend={failedRuns > 0 ? `-${failedRuns}` : "None"} trendBad={failedRuns > 0} />
       </div>
 
-      {/* Main Layout: Table + Queue */}
-      <div style={s.content}>
+      {/* Main: Table + Queue */}
+      <div style={s.mainLayout}>
         {/* Active Triggers Table */}
-        <div style={s.mainTable}>
+        <div style={s.tableCard}>
           <div style={s.cardHeader}>
-             <span style={s.cardTitle}>Active Triggers</span>
-             <button style={s.viewBtn}>Manage List ⌔</button>
+            <span style={s.cardTitle}>⚡ Active Triggers</span>
           </div>
-          <div style={s.tableWrap}>
-            <table style={s.table}>
-               <thead>
-                  <tr>
-                     <th style={s.th}>TRIGGER NAME</th>
-                     <th style={s.th}>FREQUENCY</th>
-                     <th style={s.th}>NEXT RUN</th>
-                     <th style={s.th}>STATUS</th>
-                     <th style={s.th}>ACTIONS</th>
-                  </tr>
-               </thead>
-               <tbody>
-                  {loading ? (
-                    <tr><td colSpan="5" style={s.empty}>Loading active triggers...</td></tr>
-                  ) : schedules.length === 0 ? (
-                    <tr><td colSpan="5" style={s.empty}>No schedules yet. Create one above.</td></tr>
-                  ) : schedules.map(sc => (
-                    <TriggerRow key={sc.id} name={sc.name} cron={sc.cron_expression || "—"} next="—" status={sc.enabled ? "Active" : "Paused"} isChecked={sc.enabled} />
-                  ))}
-               </tbody>
-            </table>
-          </div>
+          <table style={s.table}>
+            <thead>
+              <tr style={s.theadRow}>
+                <th style={s.th}>TRIGGER NAME</th>
+                <th style={s.th}>TYPE</th>
+                <th style={s.th}>FREQUENCY</th>
+                <th style={s.th}>STATUS</th>
+                <th style={{ ...s.th, textAlign: "right" }}>ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan="5" style={s.empty}>Loading...</td></tr>
+              ) : schedules.length === 0 ? (
+                <tr><td colSpan="5" style={s.empty}>No schedules yet. Create one to automate task execution.</td></tr>
+              ) : schedules.map(sc => (
+                <tr key={sc.id} style={s.tr}>
+                  <td style={s.tdName}>
+                    <div style={{ ...s.triggerIcon, background: sc.trigger_type === "cron" ? "#eff6ff" : "#f5f3ff", color: sc.trigger_type === "cron" ? "#3b82f6" : "#7c3aed" }}>
+                      {TRIGGER_ICONS[sc.trigger_type]}
+                    </div>
+                    <div>
+                      <div style={s.triggerName}>{sc.name}</div>
+                      <div style={s.triggerSub}>
+                        {(sc.task_ids || []).map(id => getTaskName(id)).join(", ") || "No tasks"}
+                      </div>
+                    </div>
+                  </td>
+                  <td style={s.tdCell}>
+                    <span style={{ ...s.typePill, background: sc.trigger_type === "cron" ? "#eff6ff" : "#f5f3ff", color: sc.trigger_type === "cron" ? "#3b82f6" : "#7c3aed" }}>
+                      {sc.trigger_type === "cron" ? "Schedule" : "Email"}
+                    </span>
+                  </td>
+                  <td style={{ ...s.tdCell, fontFamily: "monospace", fontSize: 12, color: "#475569" }}>
+                    {sc.trigger_type === "email" ? <span style={{ fontStyle: "italic", color: "#94a3b8" }}>coming soon</span> : cronHuman(sc.cron_expression)}
+                  </td>
+                  <td style={s.tdCell}>
+                    <button
+                      style={{ ...s.statusPill, background: sc.enabled ? "#dcfce7" : "#f3f4f6", color: sc.enabled ? "#15803d" : "#6b7280", cursor: "pointer", border: "none" }}
+                      onClick={() => handleToggle(sc)}
+                    >
+                      <span style={{ width: 6, height: 6, borderRadius: "50%", background: sc.enabled ? "#16a34a" : "#9ca3af", display: "inline-block", marginRight: 5 }} />
+                      {sc.enabled ? "Active" : "Paused"}
+                    </button>
+                  </td>
+                  <td style={{ ...s.tdCell, textAlign: "right" }}>
+                    <button style={s.editBtn} onClick={() => openEdit(sc)}>Edit</button>
+                    <button style={s.deleteBtn} onClick={() => handleDelete(sc.id)}>Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
         {/* Queue Sidebar */}
-        <div style={s.queueSidebar}>
+        <div style={s.queueCard}>
           <div style={s.cardHeader}>
-             <span style={s.cardTitle}>Execution Queue</span>
-             <span style={s.queueCount}>4 PENDING</span>
+            <span style={s.cardTitle}>🔄 Queue</span>
           </div>
-          <div style={s.queueList}>
-             {stats?.recent_runs?.filter(r => r.status === 'in_progress' || r.status === 'not_started').length > 0 ? (
-               stats.recent_runs.filter(r => r.status === 'in_progress' || r.status === 'not_started').map(run => (
-                 <QueueItem key={run.id} name={`Task #${run.task_id}`} time={new Date(run.started_at).toLocaleTimeString()} type={run.triggered_by} />
-               ))
-             ) : (
-               <div style={s.emptyQueue}>Queue is empty</div>
-             )}
-          </div>
-          <button style={s.queueBtn}>View Full Queue ›</button>
+          {scheduledRuns.length === 0 ? (
+            <div style={s.queueEmpty}>No scheduled runs yet.</div>
+          ) : scheduledRuns.slice(0, 5).map(run => (
+            <div key={run.id} style={s.queueItem}>
+              <div style={s.queueTime}>{new Date(run.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</div>
+              <div style={s.queueBody}>
+                <div style={s.queueName}>{getTaskName(run.task_id)}</div>
+                <div style={s.queueMeta}>
+                  <span style={{ ...s.queueStatus, color: run.status === "completed" ? "#16a34a" : run.status === "failed" ? "#ef4444" : "#f59e0b" }}>
+                    ● {run.status}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+          <button style={s.viewPipelineBtn}>VIEW FULL PIPELINE</button>
         </div>
       </div>
 
       {/* Recent Activity Logs */}
       <div style={s.logsSection}>
-         <div style={s.cardHeader}>
-            <span style={s.cardTitle}>Recent Activity Logs</span>
-         </div>
-         <div style={s.logsGrid}>
-            {stats?.recent_runs?.length > 0 ? stats.recent_runs.map(run => (
-              <LogCard 
-                key={run.id} 
-                border={run.status === 'completed' ? 'var(--tertiary)' : run.status === 'failed' ? 'var(--error)' : 'var(--secondary)'} 
-                title={run.status.toUpperCase()} 
-                msg={`Task #${run.task_id} ${run.status === 'completed' ? 'finished successfully' : run.status === 'failed' ? 'failed execution' : 'is currently running'}. triggered by ${run.triggered_by}.`} 
-                time={new Date(run.started_at).toLocaleTimeString()} 
-              />
-            )) : (
-              <div style={s.empty}>No activity logs yet.</div>
-            )}
-         </div>
+        <div style={s.cardTitle}>🕐 Recent Activity Logs</div>
+        <div style={s.logsGrid}>
+          {runs.filter(r => r.triggered_by === "scheduler").slice(0, 6).length === 0 ? (
+            <div style={{ fontSize: 13, color: "#94a3b8", padding: "20px 0" }}>No scheduled activity yet.</div>
+          ) : runs.filter(r => r.triggered_by === "scheduler").slice(0, 6).map(run => (
+            <div key={run.id} style={{ ...s.logCard, borderLeft: `4px solid ${run.status === "completed" ? "#16a34a" : run.status === "failed" ? "#ef4444" : "#f59e0b"}` }}>
+              <div style={s.logHeader}>
+                <span style={{ ...s.logTag, background: run.status === "completed" ? "#dcfce7" : run.status === "failed" ? "#fef2f2" : "#fef9c3", color: run.status === "completed" ? "#15803d" : run.status === "failed" ? "#dc2626" : "#92400e" }}>
+                  {run.status.toUpperCase()}
+                </span>
+                <span style={s.logTime}>{new Date(run.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+              </div>
+              <div style={s.logTitle}>{getTaskName(run.task_id)}</div>
+              <div style={s.logMsg}>
+                {run.status === "completed" ? "Finished successfully via scheduler." : run.status === "failed" ? "Execution failed. Check run logs." : "Currently running..."}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
+
+      {/* Create/Edit Modal */}
+      {showForm && (
+        <div style={s.overlay} onClick={() => setShowForm(false)}>
+          <div style={s.modal} onClick={e => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <div style={s.modalTitle}>{editId ? "Edit Schedule" : "New Schedule"}</div>
+              <button style={s.closeBtn} onClick={() => setShowForm(false)}>✕</button>
+            </div>
+            {error && <div style={s.errorMsg}>{error}</div>}
+            <div style={s.field}>
+              <label style={s.label}>SCHEDULE NAME</label>
+              <input style={s.input} placeholder="e.g. Daily Research Run" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            </div>
+            <div style={s.field}>
+              <label style={s.label}>TRIGGER TYPE</label>
+              <div style={s.typeRow}>
+                {["cron", "email"].map(t => (
+                  <button key={t} style={{ ...s.typeBtn, ...(form.trigger_type === t ? s.typeBtnActive : {}) }} onClick={() => setForm(f => ({ ...f, trigger_type: t }))}>
+                    {t === "cron" ? "⏱ Cron" : "✉ Email"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {form.trigger_type === "cron" ? (
+              <div style={s.field}>
+                <label style={s.label}>FREQUENCY</label>
+                <select style={s.input} value={customCron ? "" : form.cron_expression} onChange={e => { if (e.target.value === "") { setCustomCron(true); setForm(f => ({ ...f, cron_expression: "" })); } else { setCustomCron(false); setForm(f => ({ ...f, cron_expression: e.target.value })); } }}>
+                  {CRON_PRESETS.map(p => <option key={p.label} value={p.value}>{p.label}</option>)}
+                </select>
+                {customCron && <input style={{ ...s.input, marginTop: 8, fontFamily: "monospace" }} placeholder="e.g. 0 9 * * 1-5" value={form.cron_expression} onChange={e => setForm(f => ({ ...f, cron_expression: e.target.value }))} />}
+                {form.cron_expression && <div style={s.cronPreview}>⏱ {cronHuman(form.cron_expression)}</div>}
+              </div>
+            ) : (
+              <div style={s.emailPlaceholder}>✉ Email trigger coming soon — configuration will appear here.</div>
+            )}
+            <div style={s.field}>
+              <label style={s.label}>TASKS TO RUN</label>
+              {tasks.length === 0 ? <div style={{ fontSize: 12, color: "#94a3b8" }}>No tasks available.</div> : (
+                <div style={s.taskList}>
+                  {tasks.map(t => {
+                    const selected = form.task_ids.includes(t.id);
+                    return (
+                      <div key={t.id} style={{ ...s.taskItem, ...(selected ? s.taskItemActive : {}) }} onClick={() => toggleTask(t.id)}>
+                        <div style={{ ...s.taskCheck, background: selected ? "#6366f1" : "transparent", border: selected ? "none" : "2px solid #cbd5e1" }}>
+                          {selected && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5"><polyline points="20 6 9 17 4 12" /></svg>}
+                        </div>
+                        <div>
+                          <div style={s.taskItemName}>{t.name}</div>
+                          <div style={s.taskItemDesc}>{t.description?.slice(0, 60) || ""}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div style={s.enableRow}>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>Enabled</span>
+              <button style={{ ...s.toggleBtn, background: form.enabled ? "#dcfce7" : "#f3f4f6", color: form.enabled ? "#15803d" : "#6b7280" }} onClick={() => setForm(f => ({ ...f, enabled: !f.enabled }))}>
+                {form.enabled ? "● On" : "○ Off"}
+              </button>
+            </div>
+            <div style={s.modalFooter}>
+              <button style={s.cancelBtn} onClick={() => setShowForm(false)}>Cancel</button>
+              <button className="btn-primary" onClick={handleSave} disabled={saving}>{saving ? "Saving..." : editId ? "Save Changes" : "Create Schedule"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div style={{ ...s.toast, background: toast.ok ? "#dcfce7" : "#fee2e2", color: toast.ok ? "#15803d" : "#dc2626" }}>
+          {toast.ok ? "✓" : "✗"} {toast.msg}
+        </div>
+      )}
     </div>
   );
 }
 
-function SchedStat({ label, value, subLabel }) {
+function StatCard({ icon, iconBg, iconColor, label, value, trend, trendOk, trendBad }) {
   return (
     <div style={s.statCard}>
-       <div style={s.statLabel}>{label}</div>
-       <div style={s.statValue}>{value}</div>
-       <div style={s.statSub}>{subLabel}</div>
-    </div>
-  );
-}
-
-function TriggerRow({ name, cron, next, status, isChecked }) {
-  return (
-    <tr style={s.tr}>
-       <td>
-          <div style={s.triggerCell}>
-             <input type="checkbox" checked={isChecked} readOnly style={s.checkbox} />
-             <span style={s.triggerName}>{name}</span>
-          </div>
-       </td>
-       <td style={s.monoText}>{cron}</td>
-       <td style={s.monoText}>{next}</td>
-       <td>
-          <span style={{ ...s.statusTag, background: status === 'Active' ? 'var(--tertiary-container)' : 'var(--surface-container-low)', color: status === 'Active' ? 'var(--on-tertiary-container)' : 'var(--on-surface-variant)' }}>
-             {status}
-          </span>
-       </td>
-       <td>
-          <button style={s.iconBtn}>⚙️</button>
-       </td>
-    </tr>
-  );
-}
-
-function QueueItem({ name, time, type }) {
-  return (
-    <div style={s.queueItem}>
-       <div style={s.queueTop}>
-          <span style={s.queueName}>{name}</span>
-          <span style={s.queueTime}>{time}</span>
-       </div>
-       <div style={s.queueType}>{type}</div>
-    </div>
-  );
-}
-
-function LogCard({ border, title, msg, time }) {
-  return (
-    <div style={{ ...s.logCard, borderLeft: `4px solid ${border}` }}>
-       <div style={s.logHeader}>
-          <span style={{ ...s.logTitle, color: border }}>{title}</span>
-          <span style={s.logTime}>{time}</span>
-       </div>
-       <p style={s.logMsg}>{msg}</p>
+      <div style={s.statTop}>
+        <div style={{ ...s.statIcon, background: iconBg, color: iconColor }}>{icon}</div>
+        <span style={{ ...s.statTrend, color: trendOk ? "#16a34a" : trendBad ? "#ef4444" : "#64748b", background: trendOk ? "#dcfce7" : trendBad ? "#fef2f2" : "#f1f5f9" }}>{trend}</span>
+      </div>
+      <div style={s.statLabel}>{label}</div>
+      <div style={s.statValue}>{value}</div>
     </div>
   );
 }
 
 const s = {
-  container: { paddingBottom: 60 },
-  header: { marginBottom: 32 },
-  headerRow: { display: "flex", justifyContent: "space-between", alignItems: "flex-end" },
-  title: { fontSize: 24, fontWeight: 800 },
-  subtitle: { fontSize: 13, color: "var(--on-surface-variant)", marginTop: 4 },
-  actions: { display: "flex", gap: 12 },
-  statsGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 32 },
-  statCard: { background: "var(--surface-bright)", padding: "24px", borderRadius: 16, boxShadow: "var(--ambient-shadow)" },
-  statLabel: { fontSize: 11, fontWeight: 800, color: "var(--on-surface-variant)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 12 },
-  statValue: { fontSize: 24, fontWeight: 800, color: "var(--on-surface)", marginBottom: 8 },
-  statSub: { fontSize: 11, color: "var(--on-surface-variant)" },
-  content: { display: "grid", gridTemplateColumns: "1fr 280px", gap: 32, marginBottom: 40 },
-  mainTable: { background: "var(--surface-bright)", borderRadius: 16, padding: 24, boxShadow: "var(--ambient-shadow)" },
-  cardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 },
-  cardTitle: { fontSize: 15, fontWeight: 800 },
-  viewBtn: { background: "none", border: "none", fontSize: 12, fontWeight: 800, color: "var(--on-surface-variant)", cursor: "pointer" },
-  table: { width: "100%", borderCollapse: "separate", borderSpacing: 0 },
-  th: { padding: "12px 16px", fontSize: 11, fontWeight: 800, color: "var(--on-surface-variant)", textTransform: "uppercase", borderBottom: "1px solid var(--surface-container-low)", textAlign: "left" },
-  tr: { transition: "background 150ms" },
-  triggerCell: { display: "flex", alignItems: "center", gap: 12 },
-  checkbox: { width: 14, height: 14 },
-  triggerName: { fontSize: 13, fontWeight: 700 },
-  monoText: { fontFamily: "monospace", fontSize: 12, color: "var(--on-surface-variant)" },
-  statusTag: { padding: "4px 10px", borderRadius: 6, fontSize: 10, fontWeight: 800 },
-  iconBtn: { padding: "6px", background: "none", border: "none", fontSize: 14, cursor: "pointer", opacity: 0.5 },
-  queueSidebar: { background: "var(--surface-bright)", borderRadius: 16, padding: 24, boxShadow: "var(--ambient-shadow)", height: "fit-content" },
-  queueCount: { fontSize: 9, fontWeight: 900, background: "var(--secondary-container)", color: "var(--on-secondary-container)", padding: "2px 8px", borderRadius: 4 },
-  queueList: { display: "flex", flexDirection: "column", gap: 16, marginBottom: 24 },
-  queueItem: { borderBottom: "1px solid var(--surface-container-low)", paddingBottom: 16 },
-  queueTop: { display: "flex", justifyContent: "space-between", marginBottom: 4 },
-  queueName: { fontSize: 13, fontWeight: 700 },
-  queueTime: { fontSize: 11, color: "var(--secondary)", fontWeight: 800 },
-  queueType: { fontSize: 10, color: "var(--on-surface-variant)", textTransform: "uppercase", letterSpacing: "0.05em" },
-  queueBtn: { width: "100%", padding: "12px", borderRadius: 10, background: "var(--surface-container-low)", border: "none", fontSize: 12, fontWeight: 800, color: "var(--on-surface-variant)" },
-  logsSection: { },
-  logsGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 },
-  logCard: { background: "var(--surface-bright)", padding: 20, borderRadius: 12, boxShadow: "var(--shadow-sm)" },
-  logHeader: { display: "flex", justifyContent: "space-between", marginBottom: 12 },
-  logTitle: { fontSize: 12, fontWeight: 800, textTransform: "uppercase" },
-  logTime: { fontSize: 10, color: "var(--on-surface-variant)" },
-  logMsg: { fontSize: 12, color: "var(--on-surface-variant)", lineHeight: 1.5 },
-  empty: { padding: "40px", textAlign: "center", color: "var(--on-surface-variant)" },
-   emptyQueue: { padding: "20px 0", textAlign: "center", color: "var(--on-surface-variant)", fontSize: 13 },
+  page: { paddingBottom: 60 },
+  pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28 },
+  pageTitle: { fontSize: 28, fontWeight: 800, color: "var(--on-surface)", marginBottom: 6 },
+  pageSub: { fontSize: 13, color: "var(--on-surface-variant)", maxWidth: 520 },
+  headerActions: { display: "flex", gap: 10 },
+  exportBtn: { background: "var(--surface-bright)", border: "1px solid var(--outline)", color: "var(--on-surface)", padding: "9px 18px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" },
+  newBtn: { padding: "9px 20px", fontSize: 12 },
+
+  statsRow: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 28 },
+  statCard: { background: "#fff", padding: "20px 22px", borderRadius: 14, boxShadow: "0 1px 8px rgba(15,23,42,0.06)", border: "1px solid #f1f5f9" },
+  statTop: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 },
+  statIcon: { width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800 },
+  statTrend: { fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 6 },
+  statLabel: { fontSize: 10, fontWeight: 800, color: "#64748b", letterSpacing: "0.08em", marginBottom: 6 },
+  statValue: { fontSize: 30, fontWeight: 800, color: "#0f172a" },
+
+  mainLayout: { display: "grid", gridTemplateColumns: "1fr 260px", gap: 20, marginBottom: 32 },
+
+  tableCard: { background: "#fff", borderRadius: 14, boxShadow: "0 1px 8px rgba(15,23,42,0.06)", border: "1px solid #f1f5f9", overflow: "hidden" },
+  cardHeader: { padding: "18px 20px 14px", borderBottom: "1px solid #f1f5f9" },
+  cardTitle: { fontSize: 15, fontWeight: 800, color: "#0f172a" },
+  table: { width: "100%", borderCollapse: "collapse" },
+  theadRow: { background: "#f8fafc" },
+  th: { padding: "10px 16px", fontSize: 10, fontWeight: 800, color: "#64748b", textAlign: "left", letterSpacing: "0.06em", borderBottom: "1px solid #f1f5f9" },
+  tr: { borderBottom: "1px solid #f8fafc", transition: "background 100ms" },
+  tdName: { padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 },
+  tdCell: { padding: "14px 16px", verticalAlign: "middle" },
+  triggerIcon: { width: 34, height: 34, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  triggerName: { fontSize: 13, fontWeight: 700, color: "#0f172a" },
+  triggerSub: { fontSize: 11, color: "#94a3b8", marginTop: 2 },
+  typePill: { fontSize: 10, fontWeight: 800, padding: "3px 10px", borderRadius: 20 },
+  statusPill: { fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 20, display: "inline-flex", alignItems: "center" },
+  editBtn: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", color: "#475569", marginRight: 6 },
+  deleteBtn: { background: "transparent", border: "1px solid #fecaca", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", color: "#ef4444" },
+  empty: { padding: "40px 20px", textAlign: "center", color: "#94a3b8", fontSize: 13 },
+
+  queueCard: { background: "#fff", borderRadius: 14, boxShadow: "0 1px 8px rgba(15,23,42,0.06)", border: "1px solid #f1f5f9", padding: "0 0 16px", display: "flex", flexDirection: "column" },
+  queueEmpty: { padding: "24px 20px", fontSize: 12, color: "#94a3b8", textAlign: "center" },
+  queueItem: { display: "flex", gap: 12, padding: "12px 20px", borderBottom: "1px solid #f8fafc", alignItems: "flex-start" },
+  queueTime: { fontSize: 16, fontWeight: 800, color: "#6366f1", minWidth: 44, lineHeight: 1.2 },
+  queueBody: { flex: 1 },
+  queueName: { fontSize: 12, fontWeight: 700, color: "#0f172a" },
+  queueMeta: { marginTop: 2 },
+  queueStatus: { fontSize: 10, fontWeight: 700 },
+  viewPipelineBtn: { margin: "12px 20px 0", background: "none", border: "none", fontSize: 11, fontWeight: 800, color: "#6366f1", cursor: "pointer", letterSpacing: "0.04em", textAlign: "center" },
+
+  logsSection: { marginTop: 4 },
+  logsGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginTop: 16 },
+  logCard: { background: "#fff", borderRadius: 12, padding: "16px 18px", boxShadow: "0 1px 6px rgba(15,23,42,0.05)", border: "1px solid #f1f5f9" },
+  logHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
+  logTag: { fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 4, letterSpacing: "0.06em" },
+  logTime: { fontSize: 10, color: "#94a3b8" },
+  logTitle: { fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 6 },
+  logMsg: { fontSize: 11, color: "#64748b", lineHeight: 1.5 },
+
+  overlay: { position: "fixed", inset: 0, background: "rgba(2,6,23,0.85)", backdropFilter: "blur(12px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 32 },
+  modal: { background: "#fff", borderRadius: 16, width: "100%", maxWidth: 520, maxHeight: "90vh", overflow: "auto", padding: 28, boxShadow: "0 25px 80px rgba(0,0,0,0.4)", display: "flex", flexDirection: "column", gap: 20 },
+  modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  modalTitle: { fontSize: 18, fontWeight: 800, color: "#0f172a" },
+  closeBtn: { background: "#f8fafc", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 14, cursor: "pointer", color: "#64748b" },
+  errorMsg: { background: "#fef2f2", color: "#dc2626", padding: "10px 14px", borderRadius: 8, fontSize: 12 },
+  field: { display: "flex", flexDirection: "column", gap: 8 },
+  label: { fontSize: 10, fontWeight: 800, color: "#64748b", letterSpacing: "0.08em" },
+  input: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#0f172a", outline: "none", fontFamily: "inherit" },
+  cronPreview: { fontSize: 11, color: "#6366f1", fontWeight: 700, marginTop: 4 },
+  emailPlaceholder: { background: "#f8fafc", borderRadius: 10, padding: "16px 20px", fontSize: 13, color: "#94a3b8", fontStyle: "italic" },
+  typeRow: { display: "flex", gap: 8 },
+  typeBtn: { flex: 1, padding: "10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" },
+  typeBtnActive: { background: "#eff6ff", color: "#3b82f6", border: "1px solid #bfdbfe", fontWeight: 700 },
+  taskList: { display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" },
+  taskItem: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 8, cursor: "pointer", border: "1px solid #e2e8f0", background: "#f8fafc" },
+  taskItemActive: { background: "#eff6ff", border: "1px solid #bfdbfe" },
+  taskCheck: { width: 16, height: 16, borderRadius: 4, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 2 },
+  taskItemName: { fontSize: 13, fontWeight: 700, color: "#0f172a" },
+  taskItemDesc: { fontSize: 11, color: "#94a3b8", marginTop: 2 },
+  enableRow: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  toggleBtn: { border: "none", borderRadius: 20, padding: "4px 14px", fontSize: 11, fontWeight: 700, cursor: "pointer" },
+  modalFooter: { display: "flex", justifyContent: "flex-end", gap: 10, paddingTop: 8, borderTop: "1px solid #f1f5f9" },
+  cancelBtn: { background: "#f8fafc", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 12, fontWeight: 700, cursor: "pointer", color: "#64748b" },
+  toast: { position: "fixed", bottom: 24, right: 24, padding: "10px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 4px 20px rgba(0,0,0,0.1)", zIndex: 9999, border: "1px solid transparent" },
 };

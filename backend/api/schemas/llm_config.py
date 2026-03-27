@@ -2,7 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 
-VALID_PROVIDERS = ["openai", "anthropic", "gemini", "ollama"]
+VALID_PROVIDERS = ["openai", "anthropic", "gemini", "ollama", "groq"]
 
 
 class LLMConfigCreate(BaseModel):

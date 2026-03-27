@@ -171,3 +171,16 @@ tr:hover td { background: var(--surface-container-low); }
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* React Flow - remove default node border/shadow */
+.react-flow__node {
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.react-flow__node.selected > div,
+.react-flow__node:focus > div {
+  border-color: var(--secondary) !important;
+}

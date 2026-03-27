@@ -19,14 +19,18 @@ def should_execute_tool(state, tool_name, tool_input):
 
 
 @celery_app.task
-def run_task(task_id: int):
+def run_task(task_id: int, existing_run_id: int = None, triggered_by: str = "manual"):
     db = SessionLocal()
 
-    task_run = TaskRun(task_id=task_id, status="in_progress", started_at=datetime.utcnow())
-    db.add(task_run)
-    db.commit()
-    db.refresh(task_run)
-    run_id = task_run.id
+    if existing_run_id:
+        task_run = db.query(TaskRun).filter(TaskRun.id == existing_run_id).first()
+        run_id = existing_run_id
+    else:
+        task_run = TaskRun(task_id=task_id, status="in_progress", triggered_by=triggered_by, started_at=datetime.utcnow())
+        db.add(task_run)
+        db.commit()
+        db.refresh(task_run)
+        run_id = task_run.id
 
     def log(node_id, agent_id, event_type, message):
         entry = RunLog(
@@ -122,7 +126,7 @@ def run_task(task_id: int):
                 agent_result = ""
                 has_written_file = False
 
-                tool_usage_docs = """TOOL USAGE — respond with ONLY this JSON (no extra text before or after):
+                tool_usage_docs = """TOOL USAGE — respond with ONLY this raw JSON (no markdown, no code fences, no extra text):
 {"action": "tool_call", "tool_name": "<tool_name>", "input": <input_object>}
 
 INPUT FORMATS PER TOOL:"""
@@ -203,22 +207,39 @@ RULES:
                     log(node_id, agent.id, "llm_decision", result[:500])
 
                     # Scan for tool call JSON anywhere in the response
+                    # Strip markdown code fences first
+                    clean_result = result
+                    import re as _re
+                    clean_result = _re.sub(r"```(?:json)?", "", clean_result).replace("```", "")
+
                     tool_call = None
                     try:
-                        for match_start in [i for i, c in enumerate(result) if c == '{']:
+                        for match_start in [i for i, c in enumerate(clean_result) if c == '{']:
                             depth = 0
-                            for i, ch in enumerate(result[match_start:]):
+                            for i, ch in enumerate(clean_result[match_start:]):
                                 if ch == '{':
                                     depth += 1
                                 elif ch == '}':
                                     depth -= 1
                                     if depth == 0:
-                                        candidate = result[match_start:match_start + i + 1]
+                                        candidate = clean_result[match_start:match_start + i + 1]
                                         try:
                                             parsed = json.loads(candidate)
-                                            tool_name = parsed.get("tool_name")
                                             action = parsed.get("action", "")
+                                            tool_name = parsed.get("tool_name")
+
+                                            # Format 1: {"action": "tool_call", "tool_name": "web_search", "input": {...}}
                                             if tool_name and (action == "tool_call" or action in TOOLS):
+                                                tool_call = parsed
+                                                break
+
+                                            # Format 2: {"action": "web_search", "input": {...}} — action IS the tool name
+                                            if not tool_name and action in TOOLS:
+                                                parsed["tool_name"] = action
+                                                parsed["action"] = "tool_call"
+                                                # input may be a string — normalize to dict
+                                                if isinstance(parsed.get("input"), str):
+                                                    parsed["input"] = {"filename": parsed["input"]} if action in ("file_reader", "file_search", "file_lines") else {"query": parsed["input"]}
                                                 tool_call = parsed
                                                 break
                                         except Exception:
@@ -341,3 +362,44 @@ RULES:
         traceback.print_exc()
     finally:
         db.close()
+
+
+@celery_app.task
+def run_scheduled_task(task_id: int, schedule_id: int):
+    """Celery Beat fires this. Runs the task with triggered_by=scheduler."""
+    db = SessionLocal()
+    try:
+        task = db.query(Task).filter(Task.id == task_id).first()
+        if not task:
+            print(f"[scheduler] Task {task_id} not found")
+            return
+
+        workflow = db.query(Workflow).filter(Workflow.id == task.workflow_id).first()
+        if not workflow:
+            print(f"[scheduler] Workflow not found for task {task_id}")
+            return
+
+        # Single task_run row — no duplicate
+        task_run = TaskRun(
+            task_id=task_id,
+            status="in_progress",
+            triggered_by="scheduler",
+            workflow_snapshot=workflow.graph_json,
+            started_at=datetime.utcnow(),
+        )
+        db.add(task_run)
+        db.commit()
+        db.refresh(task_run)
+        run_id = task_run.id
+        db.close()
+
+        print(f"[scheduler] Running task {task_id} (run_id={run_id}) from schedule {schedule_id}")
+        # Pass the existing run_id so run_task doesn't create a second row
+        run_task.delay(task_id, existing_run_id=run_id, triggered_by="scheduler")
+
+    except Exception as e:
+        print(f"[scheduler] Error: {e}")
+        try:
+            db.close()
+        except Exception:
+            pass

@@ -2,11 +2,30 @@ import { useEffect, useState } from "react";
 import api from "../api/client";
 
 const TOOL_METADATA = {
-  web_search:  { group: "WEB DISCOVERY", icon: "🌐", iconBg: "#d1fae5", desc: "Search the web via Tavily API" },
-  file_reader: { group: "FILE SYSTEM",   icon: "📄", iconBg: "#dbeafe", desc: "Read full content of an uploaded file" },
-  file_search: { group: "FILE SYSTEM",   icon: "🔍", iconBg: "#dbeafe", desc: "Search for lines matching a query in a file" },
-  file_lines:  { group: "FILE SYSTEM",   icon: "📋", iconBg: "#dbeafe", desc: "Read specific line ranges from a file" },
-  file_writer: { group: "FILE SYSTEM",   icon: "✏️", iconBg: "#dbeafe", desc: "Write content to a file in the uploads directory" },
+  web_search:  { group: "WEB DISCOVERY", badge: "NETWORK",   badgeColor: "#64748b", badgeBg: "#f1f5f9", iconBg: "#d1fae5", iconColor: "#059669",
+    icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>,
+    desc: "Real-time web search and browsing via Tavily API" },
+  file_reader: { group: "FILE SYSTEM",   badge: "ESSENTIAL", badgeColor: "#7c3aed", badgeBg: "#f5f3ff", iconBg: "#dbeafe", iconColor: "#3b82f6",
+    icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>,
+    desc: "Read, write, and search across uploaded files and volumes" },
+  file_search: { group: "FILE SYSTEM",   badge: "ESSENTIAL", badgeColor: "#7c3aed", badgeBg: "#f5f3ff", iconBg: "#dbeafe", iconColor: "#3b82f6",
+    icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>,
+    desc: "Read, write, and search across uploaded files and volumes" },
+  file_lines:  { group: "FILE SYSTEM",   badge: "ESSENTIAL", badgeColor: "#7c3aed", badgeBg: "#f5f3ff", iconBg: "#dbeafe", iconColor: "#3b82f6",
+    icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>,
+    desc: "Read, write, and search across uploaded files and volumes" },
+  file_writer: { group: "FILE SYSTEM",   badge: "ESSENTIAL", badgeColor: "#7c3aed", badgeBg: "#f5f3ff", iconBg: "#dbeafe", iconColor: "#3b82f6",
+    icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>,
+    desc: "Read, write, and search across uploaded files and volumes" },
+};
+
+// Per-tool display names and descriptions
+const TOOL_DISPLAY = {
+  web_search:  { name: "Web Search",   desc: "Search the internet via Tavily" },
+  file_reader: { name: "File Reader",  desc: "Read full file content" },
+  file_search: { name: "File Search",  desc: "Search lines matching a query" },
+  file_lines:  { name: "File Lines",   desc: "Read specific line ranges" },
+  file_writer: { name: "File Writer",  desc: "Write output to a file" },
 };
 
 export default function ToolsManagement() {
@@ -20,7 +39,7 @@ export default function ToolsManagement() {
   useEffect(() => {
     Promise.all([api.get("/agents"), api.get("/tools")])
       .then(([agentsRes, toolsRes]) => {
-        setAgents(agentsRes.data);
+        setAgents(agentsRes.data.filter(a => !a.is_system));
         setTools(toolsRes.data);
         // Init permissions from agent.allowed_tools
         const perms = {};
@@ -80,24 +99,31 @@ export default function ToolsManagement() {
 
       {/* Tool Category Cards */}
       <div style={s.categoryGrid}>
-        {Object.entries(grouped).map(([group, groupTools]) => (
-          <div key={group} style={s.categoryCard}>
-            <div style={s.catCardTop}>
-              <div style={{ ...s.catIconWrap, background: TOOL_METADATA[groupTools[0]?.key]?.iconBg || "#f3f4f6" }}>
-                {TOOL_METADATA[groupTools[0]?.key]?.icon || "🔧"}
-              </div>
-              <span style={s.catBadge}>{group}</span>
-            </div>
-            <div style={s.catToolList}>
-              {groupTools.map(t => (
-                <div key={t.key} style={s.catToolRow}>
-                  <span style={s.catToolName}>{t.key}</span>
-                  <span style={s.catToolDesc}>{TOOL_METADATA[t.key]?.desc || ""}</span>
+        {Object.entries(grouped).map(([group, groupTools]) => {
+          const meta = TOOL_METADATA[groupTools[0]?.key] || {};
+          return (
+            <div key={group} style={s.categoryCard}>
+              <div style={s.catCardTop}>
+                <div style={{ ...s.catIconWrap, background: meta.iconBg, color: meta.iconColor }}>
+                  {meta.icon}
                 </div>
-              ))}
+                <span style={{ ...s.catBadgePill, background: meta.badgeBg, color: meta.badgeColor }}>
+                  {meta.badge || "TOOL"}
+                </span>
+              </div>
+              <div style={s.catGroupName}>{group}</div>
+              <div style={s.catGroupDesc}>{meta.desc}</div>
+              <div style={s.catToolList}>
+                {groupTools.map(t => (
+                  <div key={t.key} style={s.catToolRow}>
+                    <span style={s.catToolName}>{TOOL_DISPLAY[t.key]?.name || t.key}</span>
+                    <div style={s.catToolDot} title="Available" />
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Agents Tool Matrix */}
@@ -311,14 +337,16 @@ const s = {
   pageSub: { fontSize: 13, color: "var(--on-surface-variant)" },
 
   categoryGrid: { display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16, marginBottom: 28 },
-  categoryCard: { background: "var(--surface-bright)", borderRadius: 14, padding: 20, boxShadow: "var(--ambient-shadow)" },
-  catCardTop: { display: "flex", alignItems: "center", gap: 12, marginBottom: 14 },
-  catIconWrap: { width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 },
-  catBadge: { fontSize: 11, fontWeight: 800, color: "var(--on-surface)", letterSpacing: "0.04em" },
-  catToolList: { display: "flex", flexDirection: "column", gap: 8 },
-  catToolRow: { display: "flex", alignItems: "center", gap: 10, padding: "6px 10px", background: "var(--surface-container-low)", borderRadius: 8 },
-  catToolName: { fontSize: 12, fontWeight: 700, color: "var(--on-surface)", minWidth: 100 },
-  catToolDesc: { fontSize: 11, color: "var(--on-surface-variant)" },
+  categoryCard: { background: "#fff", borderRadius: 16, padding: "22px 24px", boxShadow: "0 1px 8px rgba(15,23,42,0.06)", border: "1px solid #f1f5f9" },
+  catCardTop: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 },
+  catIconWrap: { width: 48, height: 48, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" },
+  catBadgePill: { fontSize: 10, fontWeight: 800, padding: "3px 10px", borderRadius: 20, letterSpacing: "0.06em" },
+  catGroupName: { fontSize: 18, fontWeight: 800, color: "#0f172a", marginBottom: 6 },
+  catGroupDesc: { fontSize: 12, color: "#64748b", lineHeight: 1.5, marginBottom: 16 },
+  catToolList: { display: "flex", flexDirection: "column", gap: 10 },
+  catToolRow: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #f8fafc" },
+  catToolName: { fontSize: 13, fontWeight: 600, color: "#334155" },
+  catToolDot: { width: 10, height: 10, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b98166" },
 
   matrixSection: { background: "var(--surface-bright)", borderRadius: 14, padding: 24, boxShadow: "var(--ambient-shadow)", marginBottom: 28 },
   matrixHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 },

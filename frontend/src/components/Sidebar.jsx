@@ -77,17 +77,8 @@ export default function Sidebar() {
 
       {/* Footer Profile */}
       <div style={s.footer}>
-        <div style={s.profileCard}>
-          <div style={s.avatar}>AC</div>
-          <div style={s.profileInfo}>
-            <div style={s.profileName}>Alex Chen</div>
-            <div style={s.profileSub}>System admin</div>
-          </div>
-        </div>
-        <button style={s.upgradeBtn}>Upgrade Now</button>
         <div style={s.footerLinks}>
           <a href="#" style={s.footerLink}>Help</a>
-          <a href="#" style={s.footerLink}>Sign Out</a>
         </div>
       </div>
     </aside>

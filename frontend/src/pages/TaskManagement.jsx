@@ -1,59 +1,328 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import api from "../api/client";
-import { getTasks, createTask, runTask } from "../api/tasks";
-import { getWorkflows, createWorkflow } from "../api/workflows";
+import { getTasks, runTask } from "../api/tasks";
+import { getWorkflows } from "../api/workflows";
 import { getAgents } from "../api/agents";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  addEdge,
+  useNodesState,
+  useEdgesState,
+  Handle,
+  Position,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+
+// Color palette — one per agent slot, cycles if more than 8
+const AGENT_COLORS = [
+  "#6366f1", "#10b981", "#f59e0b", "#ef4444",
+  "#8b5cf6", "#06b6d4", "#f97316", "#ec4899",
+];
+const getAgentColor = (index) => AGENT_COLORS[index % AGENT_COLORS.length];
+
+// Custom node — white card with colored left border
+function AgentNode({ data }) {
+  const color = data.color || "#6366f1";
+  return (
+    <div style={{ ...nodeStyle, borderLeft: `4px solid ${color}` }}>
+      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: color }} />
+      <div style={nodeHeader}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 28, height: 28, borderRadius: 7, background: color + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color }}>
+            {data.name[0]}
+          </div>
+          <div style={nodeTitle}>{data.name}</div>
+        </div>
+        <button style={nodeRemoveBtn} onClick={(e) => { e.stopPropagation(); data.onRemove(data.id); }}>✕</button>
+      </div>
+      <div style={nodeAssigned}>
+        <span style={{ ...nodeAssignedTag, background: color + "15", color }}>
+          Assigned to: {data.name}
+        </span>
+      </div>
+      <div style={nodeMeta}>
+        <span style={{ ...nodeMetaTag, background: color + "12", color }}>STEP {String(data.index + 1).padStart(2, "0")}</span>
+      </div>
+      <Handle type="source" position={Position.Bottom} style={{ ...handleStyle, background: color }} />
+    </div>
+  );
+}
+
+const nodeStyle = {
+  background: "#ffffff",
+  borderRadius: 12,
+  padding: "14px 16px",
+  boxShadow: "0 2px 12px rgba(15,23,42,0.08)",
+  minWidth: 220,
+  border: "1px solid #e2e8f0",
+  outline: "none",
+};
+const nodeHeader = { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 };
+const nodeTitle = { fontSize: 13, fontWeight: 700, color: "#0f172a" };
+const nodeRemoveBtn = { background: "none", border: "none", fontSize: 11, cursor: "pointer", color: "#94a3b8", padding: 0, lineHeight: 1 };
+const nodeAssigned = { marginBottom: 8 };
+const nodeAssignedTag = { fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 20, display: "inline-block" };
+const nodeMeta = { display: "flex", gap: 6 };
+const nodeMetaTag = { fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 6, letterSpacing: "0.05em" };
+const handleStyle = { width: 10, height: 10, border: "2px solid #fff" };
+
+function DomainDropdown({ domain, agents, isSelected, onSelect, agentColorMap }) {
+  const [open, setOpen] = useState(true);
+  const selectedCount = agents.filter(a => isSelected(a.id)).length;
+
+  return (
+    <div style={dd.wrap}>
+      <button style={dd.header} onClick={() => setOpen(o => !o)}>
+        <span style={dd.chevron}>{open ? "▾" : "▸"}</span>
+        <span style={dd.name}>{domain.name}</span>
+        {selectedCount > 0 && <span style={dd.badge}>{selectedCount}</span>}
+        <span style={dd.count}>{agents.length}</span>
+      </button>
+      {open && (
+        <div style={dd.list}>
+          {agents.map(agent => {
+            const selected = isSelected(agent.id);
+            const color = agentColorMap[agent.id] || "#6366f1";
+            return (
+              <div
+                key={agent.id}
+                style={{ ...dd.item, ...(selected ? { background: color + "0d", border: `1px solid ${color}30` } : {}) }}
+                onClick={() => onSelect(agent)}
+              >
+                <div style={{ ...dd.avatar, background: color + "20", color }}>
+                  {agent.name[0]}
+                </div>
+                <div style={dd.info}>
+                  <div style={dd.agentName}>{agent.name}</div>
+                  <div style={dd.agentSkill}>{agent.skills?.slice(0, 36) || "No skills"}</div>
+                </div>
+                <div style={{
+                  width: 18, height: 18, borderRadius: "50%", flexShrink: 0,
+                  background: selected ? color : "transparent",
+                  border: selected ? "none" : "2px solid #cbd5e1",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  transition: "all 150ms",
+                }}>
+                  {selected && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5"><polyline points="20 6 9 17 4 12" /></svg>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const dd = {
+  wrap: { marginBottom: 6 },
+  header: { display: "flex", alignItems: "center", gap: 6, width: "100%", background: "#f8fafc", border: "none", borderRadius: 8, padding: "8px 10px", cursor: "pointer", textAlign: "left" },
+  chevron: { fontSize: 10, color: "#94a3b8", width: 12 },
+  name: { flex: 1, fontSize: 10, fontWeight: 800, color: "#475569", textTransform: "uppercase", letterSpacing: "0.07em" },
+  badge: { background: "#6366f1", color: "#fff", fontSize: 9, fontWeight: 800, padding: "1px 6px", borderRadius: 10 },
+  count: { fontSize: 10, color: "#94a3b8" },
+  list: { paddingLeft: 4, paddingTop: 4, display: "flex", flexDirection: "column", gap: 4 },
+  item: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 10, background: "#fff", cursor: "pointer", transition: "all 150ms", border: "1px solid #f1f5f9" },
+  itemActive: {},
+  avatar: { width: 30, height: 30, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, flexShrink: 0 },
+  info: { flex: 1, minWidth: 0 },
+  agentName: { fontSize: 12, fontWeight: 700, color: "#0f172a" },
+  agentSkill: { fontSize: 10, color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1 },
+};
+
+const nodeTypes = { agentNode: AgentNode };
 
 export default function TaskManagement() {
   const [tasks, setTasks] = useState([]);
   const [workflows, setWorkflows] = useState([]);
   const [agents, setAgents] = useState([]);
-  const [steps, setSteps] = useState([]);
+  const [domains, setDomains] = useState([]);
   const [form, setForm] = useState({ name: "", description: "" });
   const [mode, setMode] = useState("manual");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [runStatus, setRunStatus] = useState({});
-  const [tab, setTab] = useState("create"); // "create" | "list"
+  const [tab, setTab] = useState("create");
+
+  // React Flow state
+  const [nodes, setNodes, onNodesChange] = useNodesState([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [rfInstance, setRfInstance] = useState(null);
 
   useEffect(() => {
     getAgents().then((d) => setAgents(d.filter((a) => !a.is_system)));
     getTasks().then(setTasks);
     getWorkflows().then(setWorkflows);
+    api.get("/domains").then((r) => setDomains(r.data));
   }, []);
 
-  const toggleAgent = (agent) => {
-    setSteps((prev) => {
-      const exists = prev.find((s) => s.agent_id === agent.id);
-      if (exists) return prev.filter((s) => s.agent_id !== agent.id);
-      return [...prev, { id: Date.now(), agent_id: agent.id, name: agent.name }];
+  const onConnect = useCallback(
+    (params) => setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: "var(--secondary)" } }, eds)),
+    [setEdges]
+  );
+
+  const removeNode = useCallback((nodeId) => {
+    setNodes((nds) => {
+      const remaining = nds.filter((n) => n.id !== nodeId);
+      // Re-index
+      return remaining.map((n, i) => ({ ...n, data: { ...n.data, index: i } }));
     });
+    setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId));
+  }, [setNodes, setEdges]);
+
+  const addAgentToFlow = (agent) => {
+    const alreadyAdded = nodes.some((n) => n.data.agentId === agent.id);
+    if (alreadyAdded) {
+      setNodes((nds) => nds.filter((n) => n.data.agentId !== agent.id));
+      setEdges((eds) => eds.filter((e) => {
+        const removedNode = nodes.find((n) => n.data.agentId === agent.id);
+        return removedNode ? e.source !== removedNode.id && e.target !== removedNode.id : true;
+      }));
+      return;
+    }
+
+    const index = nodes.length;
+    const color = agentColorMap[agent.id] || getAgentColor(index);
+    const newNode = {
+      id: `node-${agent.id}-${Date.now()}`,
+      type: "agentNode",
+      position: { x: 250, y: index * 180 },
+      data: {
+        id: `node-${agent.id}-${Date.now()}`,
+        agentId: agent.id,
+        name: agent.name,
+        index,
+        color,
+        onRemove: removeNode,
+      },
+    };
+
+    // Auto-connect to previous node
+    if (nodes.length > 0) {
+      const prevNode = nodes[nodes.length - 1];
+      setEdges((eds) => addEdge({
+        id: `e-${prevNode.id}-${newNode.id}`,
+        source: prevNode.id,
+        target: newNode.id,
+        animated: true,
+        style: { stroke: color, strokeWidth: 2 },
+      }, eds));
+    }
+
+    setNodes((nds) => [...nds, newNode]);
+    // Auto fit after adding
+    setTimeout(() => rfInstance?.fitView({ padding: 0.3, duration: 300 }), 50);
   };
 
-  const isSelected = (agentId) => steps.some((s) => s.agent_id === agentId);
+  const [toast, setToast] = useState(null);
+  const [generating, setGenerating] = useState(false);
+  const [generateResult, setGenerateResult] = useState(null); // { suggested_agents, workflow_json }
 
-  const removeStep = (stepId) => setSteps((prev) => prev.filter((s) => s.id !== stepId));
+  const showToast = (msg, ok = true) => {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // Stable color map — each agent gets a consistent color by its position in the sorted list
+  const agentColorMap = {};
+  agents.forEach((a, i) => { agentColorMap[a.id] = getAgentColor(i); });
+
+  const handleGenerate = async () => {
+    if (!form.description.trim()) {
+      setError("Enter a task description first so the AI knows what to generate.");
+      return;
+    }
+    setGenerating(true);
+    setError("");
+    setGenerateResult(null);
+    try {
+      const res = await api.post("/tasks/generate", { description: form.description });
+      const { suggested_agents, workflow_json } = res.data;
+      setGenerateResult({ suggested_agents, workflow_json });
+
+      // Populate the React Flow canvas from the generated workflow
+      const agentMap = {};
+      agents.forEach((a) => { agentMap[a.id] = a; });
+
+      const newNodes = workflow_json.nodes.map((n, i) => {
+        const agent = agentMap[n.agent_id];
+        const nodeId = `node-${n.agent_id}-${Date.now()}-${i}`;
+        const color = agentColorMap[n.agent_id] || getAgentColor(i);
+        return {
+          id: nodeId,
+          type: "agentNode",
+          position: { x: 250, y: i * 180 },
+          data: { id: nodeId, agentId: n.agent_id, name: agent?.name || `Agent #${n.agent_id}`, index: i, color, onRemove: removeNode },
+          _graphNodeId: n.id,
+        };
+      });
+
+      const nodeGraphIdToFlowId = {};
+      workflow_json.nodes.forEach((n, i) => { nodeGraphIdToFlowId[n.id] = newNodes[i].id; });
+
+      const newEdges = workflow_json.edges.map((e) => ({
+        id: `e-${nodeGraphIdToFlowId[e.from]}-${nodeGraphIdToFlowId[e.to]}`,
+        source: nodeGraphIdToFlowId[e.from],
+        target: nodeGraphIdToFlowId[e.to],
+        animated: true,
+        style: { stroke: "var(--secondary)" },
+      }));
+
+      setNodes(newNodes);
+      setEdges(newEdges);
+      setTimeout(() => rfInstance?.fitView({ padding: 0.3, duration: 300 }), 100);
+      showToast("Workflow generated — review and publish when ready");
+    } catch (e) {
+      const d = e.response?.data?.detail;
+      setError(typeof d === "object" ? JSON.stringify(d) : d || "Generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+
+
+  const isSelected = (agentId) => nodes.some((n) => n.data.agentId === agentId);
+
+  const handleDelete = async (taskId) => {
+    try {
+      await api.delete(`/tasks/${taskId}`);
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      showToast("Task deleted");
+    } catch {
+      showToast("Error deleting task", false);
+    }
+  };
 
   const handlePublish = async () => {
-    if (!form.name || steps.length === 0) {
+    if (!form.name || nodes.length === 0) {
       setError("Task name and at least one agent step are required.");
       return;
     }
     setSaving(true);
     setError("");
     try {
-      const nodes = steps.map((s, i) => ({ id: `n${i + 1}`, agent_id: s.agent_id }));
-      const edges = nodes.slice(0, -1).map((n, i) => ({ from: n.id, to: nodes[i + 1].id }));
-      const wf = await api.post("/workflows", { name: form.name, graph_json: { nodes, edges } });
+      // Build graph_json from React Flow nodes and edges
+      const flowNodes = nodes.map((n, i) => ({ id: `n${i + 1}`, agent_id: n.data.agentId }));
+      // Map React Flow edge source/target to node IDs
+      const nodeIdMap = {};
+      nodes.forEach((n, i) => { nodeIdMap[n.id] = `n${i + 1}`; });
+      const flowEdges = edges.map((e) => ({ from: nodeIdMap[e.source], to: nodeIdMap[e.target] })).filter((e) => e.from && e.to);
+
+      const wf = await api.post("/workflows", { name: form.name, graph_json: { nodes: flowNodes, edges: flowEdges } });
       const task = await api.post("/tasks", {
         name: form.name,
         description: form.description,
         workflow_id: wf.data.id,
       });
       setTasks((prev) => [...prev, task.data]);
-      setSteps([]);
+      setNodes([]);
+      setEdges([]);
       setForm({ name: "", description: "" });
       setTab("list");
+      showToast("Task sequence published successfully");
     } catch (e) {
       const d = e.response?.data?.detail;
       setError(typeof d === "object" ? JSON.stringify(d) : d || "Error creating task sequence");
@@ -136,6 +405,7 @@ export default function TaskManagement() {
                   >
                     {status === "queuing" ? "..." : status === "queued" ? "✓ Queued" : "▶ Run"}
                   </button>
+                  <button style={s.deleteBtn} onClick={() => handleDelete(task.id)}>Delete</button>
                 </div>
               </div>
             );
@@ -158,7 +428,7 @@ export default function TaskManagement() {
               <div style={s.fieldGroup}>
                 <label style={s.fieldLabel}>DESCRIPTION</label>
                 <textarea
-                  style={{ ...s.fieldInput, resize: "none", height: 72 }}
+                  style={{ ...s.fieldInput, resize: "vertical", height: 120 }}
                   placeholder="Describe the objective of this sequence..."
                   value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })}
@@ -185,116 +455,110 @@ export default function TaskManagement() {
                   ? "Manually configure each agent step and coordination order."
                   : "AI will analyze your description and generate an optimized agent sequence."}
               </p>
+              {mode === "ai" && (
+                <button
+                  style={{ ...s.modeBtn, background: "#7c3aed", color: "#fff", fontWeight: 700, marginTop: 4, justifyContent: "center" }}
+                  onClick={handleGenerate}
+                  disabled={generating}
+                >
+                  {generating ? "⏳ Generating..." : "✦ Generate Workflow"}
+                </button>
+              )}
             </div>
           </div>
 
+          {/* AI Generate Result — suggested agents */}
+          {mode === "ai" && generateResult && (
+            <div style={s.generateResult}>
+              <div style={s.generateResultLabel}>✦ SUGGESTED AGENTS</div>
+              <div style={s.generateResultList}>
+                {generateResult.suggested_agents.map((a) => (
+                  <div key={a.id} style={s.generateResultItem}>
+                    <span style={s.generateResultName}>{a.name}</span>
+                    <span style={s.generateResultReason}>{a.reason}</span>
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize: 11, color: "var(--on-surface-variant)", marginTop: 8 }}>
+                Workflow loaded into canvas — adjust if needed, then Publish.
+              </p>
+            </div>
+          )}
+
           {/* Two-Column Workspace */}
           <div style={s.workspace}>
-            {/* Left: Agent Selection */}
+            {/* Left: Agent Selection - grouped by domain */}
             <div style={s.agentPanel}>
               <div style={s.panelHeader}>
                 <span style={s.panelTitle}>Agent Selection</span>
-                {steps.length > 0 && (
-                  <span style={s.selBadge}>{steps.length} SELECTED</span>
+                {nodes.length > 0 && (
+                  <span style={s.selBadge}>{nodes.length} SELECTED</span>
                 )}
               </div>
               <div style={s.agentList}>
-                {agents.length === 0 ? (
-                  <div style={s.emptyAgents}>No agents yet. Create agents first.</div>
-                ) : agents.map((agent) => {
-                  const selected = isSelected(agent.id);
+                {domains.length === 0 ? (
+                  <div style={s.emptyAgents}>No domains yet.</div>
+                ) : domains.map((domain) => {
+                  const domainAgents = agents.filter((a) => a.domain_id === domain.id);
+                  if (domainAgents.length === 0) return null;
                   return (
-                    <div
-                      key={agent.id}
-                      style={{ ...s.agentItem, ...(selected ? s.agentItemActive : {}) }}
-                      onClick={() => toggleAgent(agent)}
-                    >
-                      <div style={{ ...s.agentAvatar, background: selected ? "var(--secondary)" : "var(--surface-container)" }}>
-                        {selected ? "✓" : agent.name[0]}
-                      </div>
-                      <div style={s.agentInfo}>
-                        <div style={s.agentName}>{agent.name}</div>
-                        <div style={s.agentSkills}>{agent.skills?.slice(0, 40) || "No skills defined"}</div>
-                      </div>
-                      <div style={s.agentToggle}>
-                        <div style={{
-                          width: 18, height: 18, borderRadius: "50%",
-                          background: selected ? "var(--tertiary)" : "transparent",
-                          border: selected ? "none" : "2px solid var(--outline-variant)",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          flexShrink: 0,
-                        }}>
-                          {selected && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5"><polyline points="20 6 9 17 4 12" /></svg>}
-                        </div>
-                      </div>
-                    </div>
+                    <DomainDropdown
+                      key={domain.id}
+                      domain={domain}
+                      agents={domainAgents}
+                      isSelected={isSelected}
+                      onSelect={addAgentToFlow}
+                      agentColorMap={agentColorMap}
+                    />
                   );
                 })}
               </div>
-              <button style={s.registerBtn}>+ Register New Agent</button>
             </div>
 
-            {/* Right: Workflow Sequence Canvas */}
+            {/* Right: React Flow Canvas */}
             <div style={s.canvasPanel}>
               <div style={s.canvasHeader}>
-                <span style={s.panelTitle}>Workflow Sequence</span>
+                <span style={s.panelTitle}>Workflow Canvas</span>
                 <div style={s.canvasStats}>
-                  <span style={s.canvasStat}>● {steps.length} Nodes</span>
-                  <span style={s.canvasStat}>◌ {Math.max(0, steps.length - 1)} Connectors</span>
+                  <span style={s.canvasStat}>● {nodes.length} Nodes</span>
+                  <span style={s.canvasStat}>◌ {edges.length} Connections</span>
                 </div>
               </div>
-
-              <div style={s.canvas}>
-                {steps.length === 0 ? (
+              <div style={{ flex: 1, borderRadius: 10, overflow: "hidden", minHeight: 420, background: "#f8fafc" }}>
+                {nodes.length === 0 ? (
                   <div style={s.emptyCanvas}>
                     <div style={s.emptyCanvasIcon}>⬡</div>
-                    <div style={s.emptyCanvasText}>Select agents from the left panel to build your workflow sequence.</div>
+                    <div style={s.emptyCanvasText}>Select agents from the left panel to build your workflow.</div>
                   </div>
                 ) : (
-                  <div style={s.stepsFlow}>
-                    {steps.map((step, index) => (
-                      <div key={step.id} style={s.stepWrapper}>
-                        <div style={s.stepCard}>
-                          <div style={s.stepCardHeader}>
-                            <div style={s.stepCardTitle}>{step.name}</div>
-                            <div style={s.stepCardActions}>
-                              <button style={s.stepMoreBtn} onClick={() => removeStep(step.id)}>✕</button>
-                            </div>
-                          </div>
-                          <div style={s.stepAssigned}>
-                            <div style={s.stepAssignedDot} />
-                            Assigned to: <strong>{step.name}</strong>
-                          </div>
-                          <div style={s.stepMeta}>
-                            <span style={s.stepMetaTag}>STEP {String(index + 1).padStart(2, "0")}</span>
-                          </div>
-                        </div>
-                        {index < steps.length - 1 && (
-                          <div style={s.connector}>
-                            <div style={s.connectorLine} />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                    {/* Append step button */}
-                    <div style={s.appendStep}>
-                      <div style={s.connectorLine} />
-                      <div style={s.appendBtn}>+</div>
-                      <div style={s.appendLabel}>APPEND NEW STEP</div>
-                    </div>
-                  </div>
+                  <ReactFlow
+                    nodes={nodes.map((n) => ({ ...n, data: { ...n.data, onRemove: removeNode } }))}
+                    edges={edges}
+                    onNodesChange={onNodesChange}
+                    onEdgesChange={onEdgesChange}
+                    onConnect={onConnect}
+                    onInit={setRfInstance}
+                    nodeTypes={nodeTypes}
+                    fitView
+                    fitViewOptions={{ padding: 0.3 }}
+                    minZoom={0.3}
+                    maxZoom={1.5}
+                    defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
+                    style={{ background: "#f8fafc" }}
+                  >
+                    <Background color="#cbd5e1" gap={20} size={1} variant="dots" />
+                    <Controls style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8 }} />
+                  </ReactFlow>
                 )}
-
-                {/* Canvas Controls */}
-                <div style={s.canvasControls}>
-                  <button style={s.canvasCtrlBtn}>⊕</button>
-                  <button style={s.canvasCtrlBtn}>⊖</button>
-                  <button style={s.canvasCtrlBtn}>⊞</button>
-                </div>
               </div>
             </div>
           </div>
         </>
+      )}
+      {toast && (
+        <div style={{ ...s.toast, background: toast.ok ? "#16a34a" : "#dc2626", color: "#fff" }}>
+          {toast.msg}
+        </div>
       )}
     </div>
   );
@@ -319,7 +583,19 @@ const s = {
   fieldGroup: { display: "flex", flexDirection: "column", gap: 6 },
   fieldLabel: { fontSize: 10, fontWeight: 800, color: "var(--on-surface-variant)", letterSpacing: "0.08em" },
   fieldInput: { background: "var(--surface-bright)", border: "1px solid var(--outline)", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--on-surface)", outline: "none", fontFamily: "inherit" },
-  errorMsg: { color: "#dc2626", fontSize: 12, padding: "8px 12px", background: "#fef2f2", borderRadius: 8 },
+  domainGroup: { marginBottom: 12 },
+  domainGroupLabel: { fontSize: 10, fontWeight: 800, color: "var(--on-surface-variant)", letterSpacing: "0.08em", padding: "4px 4px 8px", textTransform: "uppercase" },  errorMsg: { color: "#dc2626", fontSize: 12, padding: "8px 12px", background: "#fef2f2", borderRadius: 8 },
+
+  // Generate result
+  generateResult: { background: "var(--surface-bright)", borderRadius: 12, padding: "16px 20px", marginBottom: 20, border: "1px solid #7c3aed33" },
+  generateResultLabel: { fontSize: 10, fontWeight: 900, color: "#7c3aed", letterSpacing: "0.08em", marginBottom: 10 },
+  generateResultList: { display: "flex", flexDirection: "column", gap: 6 },
+  generateResultItem: { display: "flex", alignItems: "baseline", gap: 10 },
+  generateResultName: { fontSize: 12, fontWeight: 700, color: "var(--on-surface)", minWidth: 120 },
+  generateResultReason: { fontSize: 11, color: "var(--on-surface-variant)" },
+
+  // Toast
+  toast: { position: "fixed", bottom: 28, right: 28, padding: "12px 20px", borderRadius: 10, fontSize: 13, fontWeight: 600, zIndex: 9999, boxShadow: "0 4px 20px rgba(0,0,0,0.15)" },
 
   // Mode Card
   modeCard: { background: "var(--surface-bright)", borderRadius: 14, padding: 20, boxShadow: "var(--ambient-shadow)", display: "flex", flexDirection: "column", gap: 8 },
@@ -332,11 +608,11 @@ const s = {
   workspace: { display: "grid", gridTemplateColumns: "280px 1fr", gap: 20 },
 
   // Agent Panel
-  agentPanel: { background: "var(--surface-bright)", borderRadius: 14, padding: 20, boxShadow: "var(--ambient-shadow)", display: "flex", flexDirection: "column" },
+  agentPanel: { background: "#fff", borderRadius: 14, padding: 20, boxShadow: "0 1px 8px rgba(15,23,42,0.06)", display: "flex", flexDirection: "column", border: "1px solid #e2e8f0" },
   panelHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
   panelTitle: { fontSize: 14, fontWeight: 800, color: "var(--on-surface)" },
   selBadge: { fontSize: 9, fontWeight: 900, background: "var(--secondary-container)", color: "var(--on-secondary-container)", padding: "3px 8px", borderRadius: 6 },
-  agentList: { display: "flex", flexDirection: "column", gap: 8, flex: 1, marginBottom: 16, overflowY: "auto", maxHeight: 400 },
+  agentList: { display: "flex", flexDirection: "column", gap: 4, flex: 1, marginBottom: 16, overflowY: "auto", maxHeight: 400, paddingRight: 16 },
   emptyAgents: { color: "var(--on-surface-variant)", fontSize: 12, padding: 16, textAlign: "center" },
   agentItem: { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, background: "var(--surface-container-low)", cursor: "pointer", transition: "all 150ms" },
   agentItemActive: { background: "var(--secondary-container)" },
@@ -348,7 +624,7 @@ const s = {
   registerBtn: { background: "var(--surface-container-low)", color: "var(--on-surface-variant)", padding: "10px", borderRadius: 8, fontSize: 12, fontWeight: 700, width: "100%", border: "none", cursor: "pointer" },
 
   // Canvas Panel
-  canvasPanel: { background: "var(--surface-container-low)", borderRadius: 14, padding: 24, display: "flex", flexDirection: "column", minHeight: 480 },
+  canvasPanel: { background: "#f8fafc", borderRadius: 14, padding: 24, display: "flex", flexDirection: "column", minHeight: 480, border: "1px solid #e2e8f0" },
   canvasHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 },
   canvasStats: { display: "flex", gap: 12 },
   canvasStat: { fontSize: 11, fontWeight: 700, color: "var(--on-surface-variant)" },
@@ -392,5 +668,6 @@ const s = {
   chainAgent: { fontSize: 11, color: "var(--on-secondary-container)", fontWeight: 600, background: "var(--secondary-container)", padding: "2px 8px", borderRadius: 6 },
   taskRowActions: { display: "flex", alignItems: "center", gap: 12 },
   nodeCount: { fontSize: 11, color: "var(--on-surface-variant)", fontWeight: 700 },
-  runBtn: { background: "#16a34a", color: "#fff", padding: "7px 16px", borderRadius: 8, fontSize: 12, fontWeight: 700 },
+  runBtn: { background: "#16a34a", color: "#fff", padding: "7px 16px", borderRadius: 8, fontSize: 12, fontWeight: 700, border: "none", cursor: "pointer" },
+  deleteBtn: { background: "transparent", color: "#dc2626", border: "1px solid #dc262633", padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" },
 };

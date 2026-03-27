@@ -34,5 +34,18 @@ services:
     volumes:
       - uploads_data:/app/uploads
 
+  celery_beat:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    command: celery -A execution.celery_app beat --loglevel=info
+    env_file:
+      - ../.env
+    depends_on:
+      - redis
+    working_dir: /app
+    volumes:
+      - uploads_data:/app/uploads
+
 volumes:
   uploads_data:

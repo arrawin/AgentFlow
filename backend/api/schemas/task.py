@@ -27,10 +27,10 @@ class TaskResponse(BaseModel):
     name: str
     description: str
     workflow_id: int
-    max_tokens: int
-    max_steps: int
-    timeout_s: int
-    retries: int
+    max_tokens: Optional[int] = 4096
+    max_steps: Optional[int] = 10
+    timeout_s: Optional[int] = 300
+    retries: Optional[int] = 3
 
     class Config:
         from_attributes = True

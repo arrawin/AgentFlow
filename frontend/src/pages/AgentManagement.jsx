@@ -83,7 +83,7 @@ export default function AgentManagement() {
               <span style={s.domainName}>All Domains</span>
               <span style={s.domainCount}>{agents.length} AGENTS</span>
             </div>
-            {domains.map((d, i) => {
+            {domains.filter(d => d.name !== "SYSTEM").map((d, i) => {
               const count = agents.filter(a => a.domain_id === d.id).length;
               return (
                 <div

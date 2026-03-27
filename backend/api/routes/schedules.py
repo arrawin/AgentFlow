@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from db.database import get_db
 from db.models import Schedule
 from api.schemas.schedule import ScheduleCreate, ScheduleUpdate, ScheduleResponse
+from execution.celery_app import register_schedules
 from typing import List
 
 router = APIRouter()
@@ -11,7 +12,6 @@ router = APIRouter()
 @router.post("/schedules", response_model=ScheduleResponse)
 def create_schedule(payload: ScheduleCreate, db: Session = Depends(get_db)):
     if payload.trigger_type == "email":
-        # Placeholder - save but no implementation
         schedule = Schedule(
             name=payload.name,
             trigger_type="email",
@@ -30,6 +30,7 @@ def create_schedule(payload: ScheduleCreate, db: Session = Depends(get_db)):
     db.add(schedule)
     db.commit()
     db.refresh(schedule)
+    register_schedules()
     return schedule
 
 
@@ -55,6 +56,7 @@ def update_schedule(schedule_id: int, update: ScheduleUpdate, db: Session = Depe
         setattr(schedule, field, value)
     db.commit()
     db.refresh(schedule)
+    register_schedules()
     return schedule
 
 
@@ -65,6 +67,7 @@ def delete_schedule(schedule_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Schedule not found")
     db.delete(schedule)
     db.commit()
+    register_schedules()
     return {"message": "Schedule deleted"}
 
 

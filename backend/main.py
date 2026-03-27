@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from db.database import engine, Base
+from seeds.workflow_architect import seed_workflow_architect
+from execution.celery_app import register_schedules
 from api.routes.domains import router as domains_router
 from api.routes.agents import router as agents_router
 from api.routes.workflows import router as workflows_router
@@ -24,6 +26,16 @@ app.add_middleware(
 
 # Create all tables on startup
 Base.metadata.create_all(bind=engine)
+
+# Seed system agents
+seed_workflow_architect()
+
+# Register cron schedules with Celery Beat
+register_schedules()
+
+# Register cron schedules with Celery Beat
+from execution.celery_app import register_schedules
+register_schedules()
 
 app.include_router(domains_router, prefix="/api", tags=["domains"])
 app.include_router(agents_router, prefix="/api", tags=["agents"])
