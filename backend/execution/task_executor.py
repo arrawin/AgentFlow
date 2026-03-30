@@ -2,6 +2,7 @@ from execution.celery_app import celery_app
 from db.database import SessionLocal
 from db.models import Agent, Task, Workflow, TaskRun, RunLog
 from services.llm_service import LLMService
+from execution.context_summariser import summarise_if_long
 from langgraph.graph import StateGraph
 from tools.registry import TOOLS
 from tools.utils import UPLOAD_DIR
@@ -306,7 +307,7 @@ RULES:
                         state["generated_files"] = []
                     state["generated_files"].extend(list(new_files))
 
-                state["intermediate_outputs"][node_id] = agent_result
+                state["intermediate_outputs"][node_id] = summarise_if_long(agent_result, llm_config)
                 log(node_id, agent.id, "output", agent_result[:1000])
 
                 print("\n" + "=" * 30)

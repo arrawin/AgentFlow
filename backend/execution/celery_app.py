@@ -77,15 +77,3 @@ from celery.signals import beat_init
 @beat_init.connect
 def on_beat_init(sender, **kwargs):
     register_schedules()
-
-
-# Add a periodic task that reloads schedules from DB every minute
-# This ensures new schedules created after Beat started are picked up automatically
-@celery_app.on_after_finalize.connect
-def setup_periodic_tasks(sender, **kwargs):
-    sender.add_periodic_task(60.0, reload_schedules_task.s(), name="reload-schedules-every-minute")
-
-
-@celery_app.task
-def reload_schedules_task():
-    register_schedules()

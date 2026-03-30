@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import api from "../api/client";
 import { getSchedules, createSchedule, updateSchedule, deleteSchedule } from "../api/schedules";
 import { getTasks } from "../api/tasks";
+import Modal from "../components/Modal";
 
 const CRON_PRESETS = [
   { label: "Every day at 9 AM",     value: "0 9 * * *" },
@@ -54,7 +55,9 @@ export default function Scheduler() {
 
   const showToast = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3000); };
 
+  const closeForm = () => { setShowForm(false); };
   const openCreate = () => { setForm(EMPTY_FORM); setEditId(null); setCustomCron(false); setError(""); setShowForm(true); };
+
   const openEdit = (sc) => {
     setForm({ name: sc.name, trigger_type: sc.trigger_type, cron_expression: sc.cron_expression || "0 9 * * *", task_ids: sc.task_ids || [], enabled: sc.enabled });
     setEditId(sc.id); setCustomCron(!CRON_PRESETS.find(p => p.value === sc.cron_expression)); setError(""); setShowForm(true);
@@ -221,11 +224,11 @@ export default function Scheduler() {
 
       {/* Create/Edit Modal */}
       {showForm && (
-        <div style={s.overlay} onClick={() => setShowForm(false)}>
+        <Modal onClose={closeForm}>
           <div style={s.modal} onClick={e => e.stopPropagation()}>
             <div style={s.modalHeader}>
               <div style={s.modalTitle}>{editId ? "Edit Schedule" : "New Schedule"}</div>
-              <button style={s.closeBtn} onClick={() => setShowForm(false)}>✕</button>
+              <button style={s.closeBtn} onClick={closeForm}>✕</button>
             </div>
             {error && <div style={s.errorMsg}>{error}</div>}
             <div style={s.field}>
@@ -282,11 +285,11 @@ export default function Scheduler() {
               </button>
             </div>
             <div style={s.modalFooter}>
-              <button style={s.cancelBtn} onClick={() => setShowForm(false)}>Cancel</button>
+              <button style={s.cancelBtn} onClick={closeForm}>Cancel</button>
               <button className="btn-primary" onClick={handleSave} disabled={saving}>{saving ? "Saving..." : editId ? "Save Changes" : "Create Schedule"}</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {toast && (
@@ -367,7 +370,7 @@ const s = {
   logTitle: { fontSize: 13, fontWeight: 700, color: "#0f172a", marginBottom: 6 },
   logMsg: { fontSize: 11, color: "#64748b", lineHeight: 1.5 },
 
-  overlay: { position: "fixed", inset: 0, background: "rgba(2,6,23,0.85)", backdropFilter: "blur(12px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 32 },
+  overlay: { position: "fixed", inset: 0, background: "rgba(15,23,42,0.25)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 32 },
   modal: { background: "#fff", borderRadius: 16, width: "100%", maxWidth: 520, maxHeight: "90vh", overflow: "auto", padding: 28, boxShadow: "0 25px 80px rgba(0,0,0,0.4)", display: "flex", flexDirection: "column", gap: 20 },
   modalHeader: { display: "flex", justifyContent: "space-between", alignItems: "center" },
   modalTitle: { fontSize: 18, fontWeight: 800, color: "#0f172a" },

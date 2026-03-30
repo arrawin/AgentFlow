@@ -13,6 +13,10 @@ def get_dashboard(db: Session = Depends(get_db)):
     schedules_count = db.query(Schedule).count()
 
     recent_runs = db.query(TaskRun).order_by(TaskRun.started_at.desc()).limit(10).all()
+
+    # Build a task name lookup
+    task_ids = {r.task_id for r in recent_runs}
+    task_names = {t.id: t.name for t in db.query(Task).filter(Task.id.in_(task_ids)).all()}
     
     # Calculate success rate
     total_runs = db.query(TaskRun).filter(TaskRun.status.in_(["completed", "failed"])).count()
@@ -28,6 +32,7 @@ def get_dashboard(db: Session = Depends(get_db)):
             {
                 "id": r.id,
                 "task_id": r.task_id,
+                "task_name": task_names.get(r.task_id, f"Task #{r.task_id}"),
                 "status": r.status,
                 "started_at": r.started_at,
                 "ended_at": r.ended_at,

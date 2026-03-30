@@ -1,21 +1,23 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@700;800&display=swap');
 
-/* ─── Color Tokens (Light Theme) ─── */
+/* ─── Color Tokens ─── */
 :root {
-  --background:                 #f4f6fb;
+  --background:                 #f5f6f8;
   --surface-bright:             #ffffff;
-  --surface-container:          #eef1f8;
-  --surface-container-low:      #f0f3fa;
-  --surface-container-high:     #e4e8f4;
-  --surface-container-lowest:   #f8faff;
+  --surface-container:          #eef0f5;
+  --surface-container-low:      #f2f4f8;
+  --surface-container-high:     #e5e8f0;
+  --surface-container-lowest:   #f8f9fc;
 
-  --primary:                    #4338ca;
-  --primary-container:          #4f46e5;
+  /* Primary: corporate blue */
+  --primary:                    #1a56db;
+  --primary-container:          #1e40af;
   --on-primary:                 #ffffff;
 
-  --secondary:                  #4f46e5;
-  --secondary-container:        #ede9fe;
-  --on-secondary-container:     #3730a3;
+  /* Secondary: corporate orange (used for accents, CTAs) */
+  --secondary:                  #ea6c00;
+  --secondary-container:        #fff0e0;
+  --on-secondary-container:     #7c3500;
 
   --tertiary:                   #059669;
   --tertiary-container:         #d1fae5;
@@ -69,8 +71,8 @@ input, select, textarea {
 }
 
 input:focus, select:focus, textarea:focus {
-  border-color: var(--secondary);
-  box-shadow: 0 0 0 3px rgba(79,70,229,0.08);
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(26,86,219,0.10);
 }
 
 input::placeholder, textarea::placeholder {
@@ -119,13 +121,13 @@ tr:hover td { background: var(--surface-container-low); }
 
 /* ─── Utility Button Classes ─── */
 .btn-primary {
-  background: var(--secondary);
+  background: var(--primary);
   color: #fff;
   padding: 9px 18px;
   border-radius: 8px;
   font-weight: 700;
   border: none;
-  box-shadow: 0 2px 8px rgba(79,70,229,0.2);
+  box-shadow: 0 2px 8px rgba(26,86,219,0.18);
 }
 
 .btn-secondary {
@@ -159,7 +161,7 @@ tr:hover td { background: var(--surface-container-low); }
 
 .status-success  { background: var(--tertiary-container);   color: var(--on-tertiary-container); }
 .status-failed   { background: var(--error-container);      color: var(--error); }
-.status-pending  { background: var(--secondary-container);  color: var(--on-secondary-container); }
+.status-pending  { background: #dbeafe;                     color: #1e40af; }
 .status-neutral  { background: var(--surface-container);    color: var(--on-surface-variant); }
 
 /* ─── Animation ─── */
@@ -183,4 +185,18 @@ tr:hover td { background: var(--surface-container-low); }
 .react-flow__node.selected > div,
 .react-flow__node:focus > div {
   border-color: var(--secondary) !important;
+}
+
+/* ─── Modal blur ─── */
+.app-blur {
+  filter: blur(5px);
+  transition: filter 150ms ease;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ─── Dry run node pulse ─── */
+@keyframes nodePulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
 }

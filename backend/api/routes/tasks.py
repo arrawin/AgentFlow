@@ -130,11 +130,30 @@ def update_task(task_id: int, update: TaskUpdate, db: Session = Depends(get_db))
 
 @router.delete("/tasks/{task_id}")
 def delete_task(task_id: int, db: Session = Depends(get_db)):
+    from db.models import TaskRun, RunLog
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    # Delete run logs and runs first to avoid FK constraint errors
+    runs = db.query(TaskRun).filter(TaskRun.task_id == task_id).all()
+    for run in runs:
+        db.query(RunLog).filter(RunLog.task_run_id == run.id).delete()
+    db.query(TaskRun).filter(TaskRun.task_id == task_id).delete()
+
+    workflow_id = task.workflow_id
     db.delete(task)
     db.commit()
+
+    # Also delete the workflow if nothing else references it
+    from db.models import Workflow
+    other = db.query(Task).filter(Task.workflow_id == workflow_id).first()
+    if not other:
+        wf = db.query(Workflow).filter(Workflow.id == workflow_id).first()
+        if wf:
+            db.delete(wf)
+            db.commit()
+
     return {"message": "Task deleted"}
 
 
@@ -145,3 +164,15 @@ def run_task_api(task_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Task not found")
     run_task.delay(task_id)
     return {"message": "Task queued for execution", "task_id": task_id}
+
+
+@router.post("/tasks/{task_id}/dry-run")
+def dry_run_task(task_id: int, db: Session = Depends(get_db)):
+    from execution.dry_run import run_dry_run
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    result = run_dry_run(task_id)
+    if result["status"] == "failed":
+        raise HTTPException(status_code=422, detail=result.get("error", "Dry run failed"))
+    return result

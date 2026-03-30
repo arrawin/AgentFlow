@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
 import api from "../api/client";
 import { useNavigate } from "react-router-dom";
-
-const DOMAIN_ICONS = ["🎧", "📊", "⌨️", "✨", "🔬", "🛡️", "🧬", "🚀", "💡", "🤖"];
+import { buildDomainColorMap, getAgentColor } from "../utils/colors";
 
 export default function AgentManagement() {
   const [agents, setAgents] = useState([]);
@@ -11,164 +10,160 @@ export default function AgentManagement() {
   const [loading, setLoading] = useState(true);
   const [newDomain, setNewDomain] = useState("");
   const [showDomainInput, setShowDomainInput] = useState(false);
+  const [toast, setToast] = useState(null);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    Promise.all([
-      api.get("/agents"),
-      api.get("/domains"),
-    ]).then(([agentsRes, domainsRes]) => {
-      setAgents(agentsRes.data);
-      setDomains(domainsRes.data);
-      setLoading(false);
-    }).catch(e => { console.error(e); setLoading(false); });
-  }, []);
+  const load = () =>
+    Promise.all([api.get("/agents"), api.get("/domains")])
+      .then(([a, d]) => { setAgents(a.data); setDomains(d.data); setLoading(false); })
+      .catch(e => { console.error(e); setLoading(false); });
+
+  useEffect(() => { load(); }, []);
+
+  const showToast = (msg, ok = true) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3000); };
 
   const handleAddDomain = async () => {
     if (!newDomain.trim()) return;
     try {
       const res = await api.post("/domains", { name: newDomain.trim() });
       setDomains(prev => [...prev, res.data]);
-      setNewDomain("");
-      setShowDomainInput(false);
-    } catch (e) {
-      alert(e.response?.data?.detail || "Error creating domain");
-    }
+      setNewDomain(""); setShowDomainInput(false);
+    } catch (e) { alert(e.response?.data?.detail || "Error creating domain"); }
   };
 
-  const filteredAgents = activeDomain
-    ? agents.filter(a => a.domain_id === activeDomain)
-    : agents;
+  const handleDelete = async (agentId) => {
+    try {
+      await api.delete(`/agents/${agentId}`);
+      setAgents(prev => prev.filter(a => a.id !== agentId));
+      showToast("Agent deleted");
+    } catch (e) { showToast(e.response?.data?.detail || "Error deleting agent", false); }
+  };
+
+  const visibleDomains = domains.filter(d => d.name !== "SYSTEM");
+  const domainColorMap = buildDomainColorMap(visibleDomains);
+  const filteredAgents = (activeDomain ? agents.filter(a => a.domain_id === activeDomain) : agents).filter(a => !a.is_system);
 
   return (
     <div className="animate-up" style={s.container}>
-      {/* Top Header Row */}
       <div style={s.topBar}>
-        <div style={s.topLinks}>
-           <a href="#" style={s.topLink}>Documentation</a>
-           <a href="#" style={s.topLink}>API Reference</a>
-           <a href="#" style={s.topLink}>Support</a>
-        </div>
-        <button className="btn-primary" style={s.deployBtn} onClick={() => navigate("/agents/create")}>Deploy Agent</button>
+        <h1 style={s.pageTitle}>Agent Management</h1>
+        <button className="btn-primary" onClick={() => navigate("/agents/create")}>+ Deploy Agent</button>
       </div>
 
       <div style={s.content}>
-        {/* Left: Domains Sidebar */}
-        <div style={s.domainSidebar}>
-          <div style={s.domainHeader}>
-            <span style={s.domainTitle}>Domains</span>
-            <button style={s.addBtn} onClick={() => setShowDomainInput(v => !v)}>+</button>
+        {/* Sidebar */}
+        <div style={s.sidebar}>
+          <div style={s.sideHeader}>
+            <span style={s.sideTitle}>Domains</span>
+            <button style={s.addBtn} onClick={() => setShowDomainInput(v => !v)} title="Add domain">+</button>
           </div>
 
           {showDomainInput && (
-            <div style={{ display: "flex", gap: 6 }}>
-              <input
-                style={{ flex: 1, padding: "6px 10px", borderRadius: 6, border: "1px solid var(--outline)", fontSize: 12, background: "var(--surface-bright)" }}
-                placeholder="Domain name"
-                value={newDomain}
-                onChange={e => setNewDomain(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleAddDomain()}
-                autoFocus
-              />
-              <button style={{ ...s.addBtn, width: "auto", padding: "0 10px", background: "var(--secondary)", color: "#fff" }} onClick={handleAddDomain}>Add</button>
+            <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+              <input style={s.domainInput} placeholder="Domain name" value={newDomain}
+                onChange={e => setNewDomain(e.target.value)} onKeyDown={e => e.key === "Enter" && handleAddDomain()} autoFocus />
+              <button style={s.domainAddBtn} onClick={handleAddDomain}>Add</button>
             </div>
           )}
 
           <div style={s.domainList}>
-            <div
-              style={{ ...s.domainItem, ...(activeDomain === null ? s.domainItemActive : {}) }}
-              onClick={() => setActiveDomain(null)}
-            >
-              <span>🌐</span>
+            <div style={{ ...s.domainItem, ...(activeDomain === null ? { background: "#f1f5f9", borderLeft: "3px solid #6366f1" } : {}) }}
+              onClick={() => setActiveDomain(null)}>
+              <div style={{ ...s.domainDot, background: "#6366f1" }} />
               <span style={s.domainName}>All Domains</span>
-              <span style={s.domainCount}>{agents.length} AGENTS</span>
+              <span style={s.domainCount}>{agents.filter(a => !a.is_system).length}</span>
             </div>
-            {domains.filter(d => d.name !== "SYSTEM").map((d, i) => {
-              const count = agents.filter(a => a.domain_id === d.id).length;
+            {visibleDomains.map(d => {
+              const color = domainColorMap[d.id];
+              const count = agents.filter(a => a.domain_id === d.id && !a.is_system).length;
+              const isActive = activeDomain === d.id;
               return (
-                <div
-                  key={d.id}
-                  style={{ ...s.domainItem, ...(activeDomain === d.id ? s.domainItemActive : {}) }}
-                  onClick={() => setActiveDomain(d.id)}
-                >
-                  <span>{DOMAIN_ICONS[i % DOMAIN_ICONS.length]}</span>
+                <div key={d.id}
+                  style={{ ...s.domainItem, ...(isActive ? { background: color + "15", borderLeft: `3px solid ${color}` } : {}) }}
+                  onClick={() => setActiveDomain(d.id)}>
+                  <div style={{ ...s.domainDot, background: color }} />
                   <span style={s.domainName}>{d.name}</span>
-                  <span style={s.domainCount}>{count} AGENTS</span>
+                  <span style={s.domainCount}>{count}</span>
                 </div>
               );
             })}
           </div>
 
-          <div style={s.infraCard}>
-            <div style={s.infraTitle}>Expand Infrastructure</div>
-            <p style={s.infraText}>Organize your AI workforce by creating targeted vertical domains.</p>
-            <button style={s.infraBtn} onClick={() => setShowDomainInput(true)}>Create New Domain</button>
+          {/* New domain prompt — light, clean */}
+          <div style={s.newDomainCard}>
+            <div style={s.newDomainIcon}>⊕</div>
+            <div style={s.newDomainText}>Group agents by function — Sales, Research, Content, etc.</div>
+            <button style={s.newDomainBtn} onClick={() => setShowDomainInput(true)}>+ New Domain</button>
           </div>
         </div>
 
-        {/* Right: Agent Grid */}
+        {/* Agent Grid */}
         <div style={s.main}>
-          <div style={s.mainHeader}>
-            <div>
-              <h1 style={s.title}>Agent Management</h1>
-              <p style={s.subtitle}>
-                {activeDomain
-                  ? `Viewing ${filteredAgents.length} agent(s) in ${domains.find(d => d.id === activeDomain)?.name}`
-                  : `Viewing all ${agents.length} agent(s)`}
-              </p>
-            </div>
-            <div style={s.mainActions}>
-              <button className="btn-secondary">Filter</button>
-              <button className="btn-secondary">Sort</button>
-            </div>
-          </div>
-
+          <p style={s.subtitle}>
+            {activeDomain
+              ? `${filteredAgents.length} agent(s) in ${domains.find(d => d.id === activeDomain)?.name}`
+              : `${filteredAgents.length} agent(s) across all domains`}
+          </p>
           <div style={s.grid}>
             {loading ? (
-              <div style={s.empty}>Loading intelligence nodes...</div>
+              <div style={s.empty}>Loading agents...</div>
             ) : (
               <>
-                {filteredAgents.map(a => (
-                  <AgentCard
-                    key={a.id}
-                    name={a.name}
-                    desc={a.skills?.slice(0, 80) || "No skills defined"}
-                    status={a.is_system ? "SYSTEM" : "ACTIVE"}
-                    statusColor={a.is_system ? "#6366f1" : "#10b981"}
-                    tags={[domains.find(d => d.id === a.domain_id)?.name || "General"]}
-                    icon="🤖"
-                    onManage={() => navigate(`/agents/edit/${a.id}`)}
-                  />
-                ))}
-                <div style={s.addItemCard} onClick={() => navigate("/agents/create")}>
+                {filteredAgents.map(a => {
+                  const color = getAgentColor(a, domainColorMap);
+                  return (
+                    <AgentCard key={a.id} agent={a} color={color}
+                      domainName={domains.find(d => d.id === a.domain_id)?.name || "General"}
+                      onManage={() => navigate(`/agents/edit/${a.id}`)}
+                      onDelete={() => handleDelete(a.id)} />
+                  );
+                })}
+                <div style={s.addCard} onClick={() => navigate("/agents/create")}>
                   <div style={s.addIcon}>+</div>
-                  <div style={s.addTitle}>Add New Agent</div>
-                  <p style={s.addText}>Define persona, skills, and deployment triggers for your next AI employee.</p>
+                  <div style={s.addTitle}>New Agent</div>
+                  <p style={s.addText}>Define skills, tools, and LLM config</p>
                 </div>
               </>
             )}
           </div>
         </div>
       </div>
+
+      {toast && (
+        <div style={{ ...s.toast, background: toast.ok ? "#dcfce7" : "#fee2e2", color: toast.ok ? "#15803d" : "#dc2626" }}>
+          {toast.msg}
+        </div>
+      )}
     </div>
   );
 }
 
-function AgentCard({ name, desc, status, statusColor = "#10b981", tags, icon, onManage }) {
+function AgentCard({ agent, color, domainName, onManage, onDelete }) {
+  const [confirming, setConfirming] = useState(false);
+
   return (
-    <div style={s.card}>
+    <div style={{ ...s.card, borderTop: `3px solid ${color}` }}>
       <div style={s.cardTop}>
-        <div style={s.cardIcon}>{icon}</div>
-        <div style={{ ...s.cardStatus, color: statusColor, background: `${statusColor}15` }}>{status}</div>
+        <div style={{ ...s.cardAvatar, background: color + "20", color }}>
+          {agent.name[0]}
+        </div>
+        <span style={{ ...s.cardDomain, background: color + "15", color }}>{domainName}</span>
       </div>
-      <h3 style={s.cardName}>{name}</h3>
-      <p style={s.cardDesc}>{desc}</p>
-      <div style={s.tagRow}>
-        {tags.map(t => <span key={t} style={s.tag}>{t}</span>)}
-      </div>
+      <div style={s.cardName}>{agent.name}</div>
+      <div style={s.cardDesc}>{agent.skills?.slice(0, 80) || "No skills defined"}</div>
       <div style={s.cardFooter}>
-         <div style={s.miniAvatar}>AC</div>
-         <button style={s.manageBtn} onClick={onManage}>Manage</button>
+        {confirming ? (
+          <>
+            <span style={{ fontSize: 11, color: "#64748b", flex: 1 }}>Delete agent?</span>
+            <button style={s.confirmYes} onClick={() => { setConfirming(false); onDelete(); }}>Yes</button>
+            <button style={s.confirmNo} onClick={() => setConfirming(false)}>No</button>
+          </>
+        ) : (
+          <>
+            <button style={{ ...s.manageBtn, background: color }} onClick={onManage}>Manage</button>
+            <button style={s.deleteBtn} onClick={() => setConfirming(true)}>Delete</button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -176,104 +171,49 @@ function AgentCard({ name, desc, status, statusColor = "#10b981", tags, icon, on
 
 const s = {
   container: { paddingBottom: 40 },
-  topBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 32,
-  },
-  topLinks: { display: "flex", gap: 24 },
-  topLink: { fontSize: 12, fontWeight: 700, color: "var(--on-surface-variant)", textDecoration: "none" },
-  deployBtn: { padding: "8px 20px" },
-  content: {
-    display: "grid",
-    gridTemplateColumns: "240px 1fr",
-    gap: 32,
-    alignItems: "start",
-  },
-  domainSidebar: {
-    background: "rgba(226, 232, 240, 0.4)",
-    borderRadius: 16,
-    padding: 20,
-    display: "flex",
-    flexDirection: "column",
-    gap: 24,
-  },
-  domainHeader: { display: "flex", justifyContent: "space-between", alignItems: "center" },
-  domainTitle: { fontSize: 15, fontWeight: 800 },
-  addBtn: { width: 24, height: 24, background: "var(--surface-container)", borderRadius: 6, border: "none", fontSize: 14, fontWeight: 800, color: "var(--on-surface-variant)", cursor: "pointer" },
-  domainList: { display: "flex", flexDirection: "column", gap: 8 },
-  domainItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-    padding: "12px 14px",
-    borderRadius: 8,
-    background: "transparent",
-    color: "var(--on-surface-variant)",
-    fontSize: 13,
-    fontWeight: 700,
-    cursor: "pointer",
-    transition: "all 150ms",
-  },
-  domainItemActive: {
-    background: "var(--on-surface)",
-    color: "#fff",
-  },
+  topBar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 },
+  pageTitle: { fontSize: 26, fontWeight: 800, color: "var(--on-surface)" },
+
+  content: { display: "grid", gridTemplateColumns: "240px 1fr", gap: 28, alignItems: "start" },
+
+  sidebar: { background: "#fff", borderRadius: 16, padding: 20, display: "flex", flexDirection: "column", gap: 14, border: "1px solid #f1f5f9", boxShadow: "0 1px 8px rgba(15,23,42,0.06)" },
+  sideHeader: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  sideTitle: { fontSize: 13, fontWeight: 800, color: "#0f172a" },
+  addBtn: { width: 24, height: 24, background: "#f1f5f9", borderRadius: 6, border: "none", fontSize: 16, fontWeight: 800, color: "#64748b", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
+  domainInput: { flex: 1, padding: "6px 10px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 12, outline: "none" },
+  domainAddBtn: { background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" },
+  domainList: { display: "flex", flexDirection: "column", gap: 3 },
+  domainItem: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, color: "#475569", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 150ms", borderLeft: "3px solid transparent" },
+  domainDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
   domainName: { flex: 1 },
-  domainCount: { fontSize: 9, fontWeight: 800, padding: "2px 6px", borderRadius: 4, background: "rgba(255,255,255,0.15)" },
-  infraCard: {
-    marginTop: 20,
-    background: "var(--on-surface)",
-    borderRadius: 12,
-    padding: "20px 16px",
-    textAlign: "center",
-  },
-  infraTitle: { fontSize: 14, fontWeight: 800, color: "#fff", marginBottom: 8 },
-  infraText: { fontSize: 11, color: "rgba(255,255,255,0.6)", lineHeight: 1.5, marginBottom: 16 },
-  infraBtn: { width: "100%", background: "#fff", color: "var(--on-surface)", padding: "8px", borderRadius: 6, fontSize: 11, fontWeight: 800 },
+  domainCount: { fontSize: 11, fontWeight: 700, color: "#94a3b8" },
+
+  newDomainCard: { background: "#f8fafc", borderRadius: 12, padding: "16px", textAlign: "center", border: "1px dashed #e2e8f0", marginTop: 4 },
+  newDomainIcon: { fontSize: 20, color: "#94a3b8", marginBottom: 8 },
+  newDomainText: { fontSize: 11, color: "#94a3b8", lineHeight: 1.5, marginBottom: 12 },
+  newDomainBtn: { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 14px", fontSize: 11, fontWeight: 700, color: "#475569", cursor: "pointer", width: "100%" },
+
   main: {},
-  mainHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginBottom: 28 },
-  title: { fontSize: 24, fontWeight: 800, marginBottom: 4 },
-  subtitle: { fontSize: 13, color: "var(--on-surface-variant)" },
-  mainActions: { display: "flex", gap: 12 },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-    gap: 20,
-  },
-  card: {
-    background: "var(--surface-bright)",
-    borderRadius: 16,
-    padding: 20,
-    boxShadow: "var(--ambient-shadow)",
-    display: "flex",
-    flexDirection: "column",
-  },
-  cardTop: { display: "flex", justifyContent: "space-between", marginBottom: 16 },
-  cardIcon: { width: 32, height: 32, borderRadius: 10, background: "var(--surface-container-low)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 },
-  cardStatus: { fontSize: 9, fontWeight: 900, padding: "3px 8px", borderRadius: 6, letterSpacing: "0.05em" },
-  cardName: { fontSize: 16, fontWeight: 800, marginBottom: 8 },
-  cardDesc: { fontSize: 12, color: "var(--on-surface-variant)", lineHeight: 1.5, marginBottom: 16 },
-  tagRow: { display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 20 },
-  tag: { fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6, background: "var(--surface-container-low)", color: "var(--on-surface-variant)" },
-  cardFooter: { marginTop: "auto", display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--surface-container-low)", paddingTop: 16 },
-  miniAvatar: { width: 20, height: 20, borderRadius: "50%", background: "var(--surface-container)", fontSize: 8, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" },
-  manageBtn: { background: "var(--on-surface)", color: "#fff", padding: "6px 14px", borderRadius: 6, fontSize: 12, fontWeight: 700 },
-  addItemCard: {
-    background: "transparent",
-    border: "2px dashed var(--surface-container-high)",
-    borderRadius: 16,
-    padding: 24,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    textAlign: "center",
-    cursor: "pointer",
-  },
-  addIcon: { width: 32, height: 32, borderRadius: "50%", background: "var(--surface-container-high)", color: "var(--on-surface-variant)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, marginBottom: 16 },
-  addTitle: { fontSize: 14, fontWeight: 800, color: "var(--on-surface)", marginBottom: 8 },
-  addText: { fontSize: 11, color: "var(--on-surface-variant)", lineHeight: 1.5 },
-  empty: { padding: 40, textAlign: "center", color: "var(--on-surface-variant)" },
+  subtitle: { fontSize: 13, color: "var(--on-surface-variant)", marginBottom: 20 },
+  grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 },
+
+  card: { background: "#fff", borderRadius: 14, padding: 18, boxShadow: "0 1px 8px rgba(15,23,42,0.06)", border: "1px solid #f1f5f9", display: "flex", flexDirection: "column", gap: 10 },
+  cardTop: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  cardAvatar: { width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800 },
+  cardDomain: { fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 20, letterSpacing: "0.04em" },
+  cardName: { fontSize: 15, fontWeight: 800, color: "#0f172a" },
+  cardDesc: { fontSize: 12, color: "#64748b", lineHeight: 1.5, flex: 1 },
+  cardFooter: { display: "flex", gap: 8, paddingTop: 10, borderTop: "1px solid #f1f5f9", marginTop: "auto" },
+  manageBtn: { flex: 1, color: "#fff", border: "none", borderRadius: 8, padding: "7px", fontSize: 12, fontWeight: 700, cursor: "pointer" },
+  deleteBtn: { background: "transparent", border: "1px solid #fecaca", color: "#ef4444", borderRadius: 8, padding: "7px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer" },
+  confirmYes: { background: "#fef2f2", border: "1px solid #fecaca", color: "#ef4444", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" },
+  confirmNo: { background: "#f8fafc", border: "1px solid #e2e8f0", color: "#64748b", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" },
+
+  addCard: { background: "transparent", border: "2px dashed #e2e8f0", borderRadius: 14, padding: 24, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", cursor: "pointer", gap: 8 },
+  addIcon: { width: 32, height: 32, borderRadius: "50%", background: "#f1f5f9", color: "#94a3b8", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 },
+  addTitle: { fontSize: 14, fontWeight: 800, color: "#0f172a" },
+  addText: { fontSize: 11, color: "#94a3b8", lineHeight: 1.5 },
+
+  empty: { padding: 40, textAlign: "center", color: "#94a3b8" },
+  toast: { position: "fixed", bottom: 24, right: 24, padding: "10px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 4px 20px rgba(0,0,0,0.1)", zIndex: 9999 },
 };

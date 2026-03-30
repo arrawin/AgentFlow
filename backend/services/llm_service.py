@@ -31,7 +31,7 @@ class LLMService:
             self.api_key = enc.decrypt(llm_config.api_key_encrypted)
             self.provider = llm_config.provider.lower()
             self.model = llm_config.model
-            self.base_url = llm_config.base_url or PROVIDER_URLS.get(self.provider)
+            self.base_url = self._resolve_url(llm_config.base_url or PROVIDER_URLS.get(self.provider))
             self.temperature = llm_config.temperature or 0.7
             self.max_tokens = llm_config.max_tokens or 2048
         else:
@@ -45,6 +45,14 @@ class LLMService:
 
         if not self.api_key:
             print(f"WARNING: No API key for provider '{self.provider}'")
+
+    @staticmethod
+    def _resolve_url(url: str) -> str:
+        """Rewrite localhost to host.docker.internal so user-provided URLs work from inside Docker."""
+        if not url:
+            return url
+        import re
+        return re.sub(r'(https?://)localhost\b', r'\1host.docker.internal', url)
 
     def generate(self, prompt: str) -> str:
         if not self.api_key:

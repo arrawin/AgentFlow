@@ -21,8 +21,11 @@ export default function LLMSettings() {
   const [selectedProvider, setSelectedProvider] = useState("groq");
   const [form, setForm] = useState({ model: "", api_key: "", base_url: "", temperature: 0.7, max_tokens: 2048 });
   const [msg, setMsg] = useState({ text: "", ok: true });
+  const [editingId, setEditingId] = useState(null);
+  const [editForm, setEditForm] = useState({});
 
-  useEffect(() => { api.get("/llm-configs").then(r => setConfigs(r.data)); }, []);
+  const reload = () => api.get("/llm-configs").then(r => setConfigs(r.data));
+  useEffect(() => { reload(); }, []);
 
   const handleSave = async () => {
     setMsg({ text: "", ok: true });
@@ -30,7 +33,7 @@ export default function LLMSettings() {
       await api.post("/llm-configs", { ...form, provider: selectedProvider });
       setMsg({ text: "Config saved successfully", ok: true });
       setForm({ model: "", api_key: "", base_url: "", temperature: 0.7, max_tokens: 2048 });
-      api.get("/llm-configs").then(r => setConfigs(r.data));
+      reload();
     } catch (e) {
       setMsg({ text: e.response?.data?.detail || "Error saving config", ok: false });
     }
@@ -39,7 +42,22 @@ export default function LLMSettings() {
   const handleDelete = async (id) => {
     if (!confirm("Delete this config?")) return;
     await api.delete(`/llm-configs/${id}`);
-    api.get("/llm-configs").then(r => setConfigs(r.data));
+    reload();
+  };
+
+  const startEdit = (c) => {
+    setEditingId(c.id);
+    setEditForm({ model: c.model, base_url: c.base_url || "", api_key: "", temperature: c.temperature, max_tokens: c.max_tokens });
+  };
+
+  const handleUpdate = async (id) => {
+    try {
+      await api.put(`/llm-configs/${id}`, editForm);
+      setEditingId(null);
+      reload();
+    } catch (e) {
+      alert(e.response?.data?.detail || "Error updating config");
+    }
   };
 
   const providers = ["groq", "openai", "anthropic", "gemini", "ollama"];
@@ -107,13 +125,43 @@ export default function LLMSettings() {
               <div style={s.sectionHeader}>SAVED CONFIGURATIONS</div>
               {configs.map(c => (
                 <div key={c.id} style={s.configRow}>
-                  <div style={s.configLeft}>
-                    <span style={s.configProvider}>{c.provider}</span>
-                    <span style={s.configModel}>{c.model}</span>
-                    {c.is_default && <span style={s.defaultTag}>DEFAULT</span>}
-                  </div>
-                  <div style={s.configMeta}>API Key: sk-••••••••  ·  Temp: {c.temperature}</div>
-                  <button style={s.deleteBtn} onClick={() => handleDelete(c.id)}>Delete</button>
+                  {editingId === c.id ? (
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div style={s.field}>
+                          <label style={s.label}>MODEL</label>
+                          <input value={editForm.model} onChange={e => setEditForm({ ...editForm, model: e.target.value })} />
+                        </div>
+                        <div style={s.field}>
+                          <label style={s.label}>BASE URL</label>
+                          <input value={editForm.base_url} onChange={e => setEditForm({ ...editForm, base_url: e.target.value })} placeholder="Leave blank for default" />
+                        </div>
+                        <div style={s.field}>
+                          <label style={s.label}>NEW API KEY (leave blank to keep existing)</label>
+                          <input type="password" value={editForm.api_key} onChange={e => setEditForm({ ...editForm, api_key: e.target.value })} placeholder="sk-..." />
+                        </div>
+                        <div style={s.field}>
+                          <label style={s.label}>TEMPERATURE: {editForm.temperature}</label>
+                          <input type="range" min="0" max="2" step="0.1" value={editForm.temperature} onChange={e => setEditForm({ ...editForm, temperature: parseFloat(e.target.value) })} />
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button className="btn-primary" style={{ fontSize: 12, padding: "6px 14px" }} onClick={() => handleUpdate(c.id)}>Save</button>
+                        <button style={s.cancelBtn} onClick={() => setEditingId(null)}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div style={s.configLeft}>
+                        <span style={s.configProvider}>{c.provider}</span>
+                        <span style={s.configModel}>{c.model}</span>
+                        {c.is_default && <span style={s.defaultTag}>DEFAULT</span>}
+                      </div>
+                      <div style={s.configMeta}>API Key: sk-••••••••  ·  Temp: {c.temperature}</div>
+                      <button style={s.editBtn} onClick={() => startEdit(c)}>Edit</button>
+                      <button style={s.deleteBtn} onClick={() => handleDelete(c.id)}>Delete</button>
+                    </>
+                  )}
                 </div>
               ))}
             </section>
@@ -194,6 +242,8 @@ const s = {
   defaultTag: { background: "var(--tertiary-container)", color: "var(--on-tertiary-container)", fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 20 },
   configMeta: { fontSize: 11, color: "var(--on-surface-variant)" },
   deleteBtn: { background: "transparent", color: "var(--error)", border: "1px solid var(--error)", borderRadius: 6, padding: "4px 10px", fontSize: 11 },
+  editBtn: { background: "transparent", color: "var(--secondary)", border: "1px solid var(--secondary)", borderRadius: 6, padding: "4px 10px", fontSize: 11 },
+  cancelBtn: { background: "transparent", color: "var(--on-surface-variant)", border: "1px solid var(--outline)", borderRadius: 6, padding: "6px 14px", fontSize: 12 },
   contextCard: { background: "var(--surface-container-low)", borderRadius: 12, padding: "16px 20px", display: "flex", alignItems: "center", gap: 16 },
   contextIcon: { fontSize: 20 },
   contextTitle: { fontSize: 13, fontWeight: 800, color: "var(--on-surface)" },

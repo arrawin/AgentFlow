@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../api/client";
+import Modal from "../components/Modal";
 
 export default function RunHistory() {
   const [runs, setRuns] = useState([]);
@@ -29,6 +30,7 @@ export default function RunHistory() {
 
   const openTrace = async (run) => {
     setSelectedRun(run);
+    window.setModalOpen(true);
     setTraceLoading(true);
     try {
       const res = await api.get(`/runs/${run.id}/trace`);
@@ -96,10 +98,18 @@ export default function RunHistory() {
 
       {/* Stats Cards */}
       <div style={s.statsRow}>
-        <StatCard label="TOTAL RUNS" value={totalRuns} icon="▷" accent="#6366f1" trend="+12%" trendUp />
-        <StatCard label="SUCCESS RATE" value={`${successRate}%`} icon="◉" accent="#10b981" trend="Stable" trendUp />
-        <StatCard label="AVG EXECUTION" value={avgExec} icon="⏱" accent="#f59e0b" trend="Duration" />
-        <StatCard label="FAILED RUNS" value={failedRuns} icon="⊘" accent="#ef4444" isBad={failedRuns > 0} trend={failedRuns > 0 ? `${failedRuns} errors` : "None"} />
+        <StatCard label="TOTAL RUNS" value={totalRuns}
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>}
+          iconBg="#eff6ff" iconColor="#6366f1" trend="+12%" trendUp />
+        <StatCard label="SUCCESS RATE" value={`${successRate}%`}
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>}
+          iconBg="#f0fdf4" iconColor="#10b981" trend="Stable" trendUp />
+        <StatCard label="AVG EXECUTION" value={avgExec}
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>}
+          iconBg="#fffbeb" iconColor="#f59e0b" trend="Duration" />
+        <StatCard label="FAILED RUNS" value={failedRuns}
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>}
+          iconBg="#fef2f2" iconColor="#ef4444" isBad={failedRuns > 0} trend={failedRuns > 0 ? `${failedRuns} errors` : "None"} />
       </div>
 
       {/* Main Table */}
@@ -125,7 +135,7 @@ export default function RunHistory() {
                 Acquiring audit history...
               </td></tr>
             ) : filteredRuns.length === 0 ? (
-              <PlaceholderRows getTaskName={getTaskName} openTrace={openTrace} />
+              <tr><td colSpan="7" style={s.empty}>No runs yet. Run a task to see history here.</td></tr>
             ) : (
               pagedRuns.map((run) => {
                 const duration = (() => {
@@ -213,7 +223,7 @@ export default function RunHistory() {
 
       {/* Trace Modal */}
       {selectedRun && (
-        <div style={s.modalOverlay} onClick={() => setSelectedRun(null)}>
+        <Modal onClose={() => setSelectedRun(null)}>
           <div style={s.modalContent} onClick={(e) => e.stopPropagation()}>
             <div style={s.modalHeader}>
               <div>
@@ -253,7 +263,9 @@ export default function RunHistory() {
             {selectedRun.final_output && (
               <div style={s.outputSection}>
                 <div style={s.outputLabel}>FINAL OUTPUT</div>
-                <pre style={s.outputPre}>{selectedRun.final_output}</pre>
+                <div style={s.outputPre}>
+                  <MarkdownOutput text={selectedRun.final_output} />
+                </div>
               </div>
             )}
 
@@ -293,7 +305,7 @@ export default function RunHistory() {
               )}
             </div>
           </div>
-        </div>
+        </Modal>
       )}
     </div>
   );
@@ -307,11 +319,11 @@ function formatDate(dateStr) {
   }).replace(",", " ·");
 }
 
-function StatCard({ label, value, icon, accent, isBad, trend, trendUp }) {
+function StatCard({ label, value, icon, iconBg, iconColor, isBad, trend, trendUp }) {
   return (
     <div style={s.statCard}>
       <div style={s.statTop}>
-        <div style={{ ...s.statIcon, color: accent, background: `${accent}18` }}>{icon}</div>
+        <div style={{ ...s.statIcon, background: iconBg, color: iconColor }}>{icon}</div>
         {trend && (
           <span style={{ fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 6,
             background: trendUp ? "#dcfce7" : isBad ? "#fef2f2" : "#f1f5f9",
@@ -325,6 +337,45 @@ function StatCard({ label, value, icon, accent, isBad, trend, trendUp }) {
     </div>
   );
 }
+
+function parseInline(text, key) {
+  // Split on inline patterns: **bold**, *italic*, `code`, [link](url)
+  const parts = [];
+  const re = /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g;
+  let last = 0, m, idx = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(<span key={`${key}-t${idx++}`}>{text.slice(last, m.index)}</span>);
+    if (m[2]) parts.push(<strong key={`${key}-s${idx++}`}><em>{m[2]}</em></strong>);
+    else if (m[3]) parts.push(<strong key={`${key}-b${idx++}`}>{m[3]}</strong>);
+    else if (m[4]) parts.push(<em key={`${key}-i${idx++}`}>{m[4]}</em>);
+    else if (m[5]) parts.push(<code key={`${key}-c${idx++}`} style={{ background: "#1e293b", padding: "1px 5px", borderRadius: 3, fontSize: 11, color: "#7dd3fc" }}>{m[5]}</code>);
+    else if (m[6]) parts.push(<a key={`${key}-a${idx++}`} href={m[7]} target="_blank" rel="noreferrer" style={{ color: "#60a5fa", textDecoration: "underline" }}>{m[6]}</a>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(<span key={`${key}-t${idx++}`}>{text.slice(last)}</span>);
+  return parts.length ? parts : text;
+}
+
+function MarkdownOutput({ text }) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  return (
+    <div>
+      {lines.map((line, i) => {
+        if (/^### (.+)/.test(line)) return <h3 key={i} style={{ fontSize: 14, fontWeight: 800, color: "#e2e8f0", margin: "12px 0 4px" }}>{parseInline(line.replace(/^### /, ""), i)}</h3>;
+        if (/^## (.+)/.test(line)) return <h2 key={i} style={{ fontSize: 15, fontWeight: 800, color: "#f1f5f9", margin: "14px 0 6px" }}>{parseInline(line.replace(/^## /, ""), i)}</h2>;
+        if (/^# (.+)/.test(line)) return <h1 key={i} style={{ fontSize: 17, fontWeight: 800, color: "#fff", margin: "16px 0 8px" }}>{parseInline(line.replace(/^# /, ""), i)}</h1>;
+        if (/^> (.+)/.test(line)) return <blockquote key={i} style={{ borderLeft: "3px solid #475569", paddingLeft: 10, margin: "4px 0", color: "#94a3b8", fontSize: 12 }}>{parseInline(line.replace(/^> /, ""), i)}</blockquote>;
+        if (/^[-*] (.+)/.test(line)) return <li key={i} style={{ fontSize: 12, color: "#cbd5e1", margin: "2px 0 2px 16px", lineHeight: 1.6 }}>{parseInline(line.replace(/^[-*] /, ""), i)}</li>;
+        if (/^\d+\. (.+)/.test(line)) return <li key={i} style={{ fontSize: 12, color: "#cbd5e1", margin: "2px 0 2px 16px", lineHeight: 1.6, listStyleType: "decimal" }}>{parseInline(line.replace(/^\d+\. /, ""), i)}</li>;
+        if (/^```/.test(line)) return null; // skip code fence markers
+        if (line.trim() === "") return <br key={i} />;
+        return <p key={i} style={{ fontSize: 12, color: "#cbd5e1", margin: "2px 0", lineHeight: 1.6 }}>{parseInline(line, i)}</p>;
+      })}
+    </div>
+  );
+}
+
 
 function StatusPill({ status }) {
   const normalized = status?.toLowerCase() || "completed";
@@ -341,47 +392,6 @@ function StatusPill({ status }) {
       {config.label}
     </div>
   );
-}
-
-function PlaceholderRows() {
-  const data = [
-    { name: "Daily_Cache_Purge", time: "Mar 26, 2026 · 08:00:04", status: "completed", code: "—", dot: "#3b82f6" },
-    { name: "Realtime_Ingress_Stream", time: "Mar 26, 2026 · 12:44:12", status: "in_progress", code: "—", dot: "#f59e0b" },
-    { name: "Monthly_Report_Aggregator", time: "Mar 25, 2026 · 02:15:00", status: "failed", code: "ERR_TIMEOUT_408", dot: "#ef4444" },
-    { name: "IPL_2026_Schedule", time: "Mar 25, 2026 · 23:59:59", status: "completed", code: "—", dot: "#3b82f6", files: ["ipl_2026_schedule.md"] },
-    { name: "Auth_Token_Refresh", time: "Mar 25, 2026 · 09:12:33", status: "completed", code: "—", dot: "#3b82f6" },
-  ];
-  return data.map((d, i) => (
-    <tr key={i} style={s.tr}>
-      <td style={s.taskCell}>
-        <div style={{ ...s.statusDot, background: d.dot }} />
-        <span style={s.taskName}>{d.name}</span>
-      </td>
-      <td style={s.tdTime}>{d.time}</td>
-      <td><StatusPill status={d.status} /></td>
-      <td style={{ ...s.tdError, color: d.status === "failed" ? "#991b1b" : "var(--on-surface-variant)" }}>{d.code}</td>
-      <td style={s.tdFiles}>
-        {d.files ? (
-          <div style={s.fileChips}>
-            {d.files.map((f) => (
-              <span key={f} style={s.fileChip}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                {f}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <span style={{ fontSize: 11, color: "var(--on-surface-variant)" }}>—</span>
-        )}
-      </td>
-      <td style={s.tdAction}>
-        <button style={s.showLogBtn}>
-          {d.status === "not_started" ? "Show Log 🔒" : "Show Log"}
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-      </td>
-    </tr>
-  ));
 }
 
 const s = {
@@ -459,7 +469,7 @@ const s = {
   // Modal
   modalOverlay: {
     position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
-    background: "rgba(15, 23, 42, 0.5)", backdropFilter: "blur(4px)",
+    background: "rgba(15, 23, 42, 0.25)", backdropFilter: "blur(6px)",
     display: "flex", alignItems: "center", justifyContent: "center",
     zIndex: 1000, padding: 32,
   },
@@ -490,8 +500,8 @@ const s = {
   outputLabel: { fontSize: 10, fontWeight: 800, color: "var(--on-surface-variant)", letterSpacing: "0.06em", marginBottom: 8 },
   outputPre: {
     background: "#0f172a", color: "#e2e8f0", padding: 16, borderRadius: 10,
-    fontSize: 12, lineHeight: 1.6, fontFamily: "'IBM Plex Mono', monospace",
-    overflow: "auto", maxHeight: 200, whiteSpace: "pre-wrap", wordBreak: "break-word",
+    fontSize: 12, lineHeight: 1.6,
+    overflow: "auto", maxHeight: 300,
   },
 
   traceSection: {},

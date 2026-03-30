@@ -7,25 +7,28 @@ export default function TraceDrawer({ run, onClose }) {
 
   useState(() => {
     if (!run) return;
+    window.setModalOpen(true);
     getRunTrace(run.id).then(data => {
       setTrace(data.trace);
       setLoading(false);
     }).catch(() => setLoading(false));
   }, [run]);
 
+  const handleClose = () => { window.setModalOpen(false); onClose(); };
+
   if (!run) return null;
 
   const grouped = groupByNode(trace || []);
 
   return (
-    <div style={s.overlay} onClick={onClose}>
+    <div style={s.overlay} onClick={handleClose}>
       <div style={s.drawer} onClick={e => e.stopPropagation()}>
         <div style={s.header}>
           <div>
             <div style={s.title}>Execution Trace</div>
             <div style={s.sub}>Run #{run.id} · <StatusText status={run.status} /></div>
           </div>
-          <button style={s.closeBtn} onClick={onClose}>✕</button>
+          <button style={s.closeBtn} onClick={handleClose}>✕</button>
         </div>
 
         {loading ? (
@@ -98,7 +101,7 @@ function eventColor(type) {
 }
 
 const s = {
-  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 500, display: "flex", justifyContent: "flex-end" },
+  overlay: { position: "fixed", inset: 0, background: "rgba(15,23,42,0.25)", backdropFilter: "blur(6px)", zIndex: 500, display: "flex", justifyContent: "flex-end" },
   drawer: { width: 500, background: "var(--surface-bright)", borderLeft: "1px solid var(--outline)", height: "100vh", overflow: "auto", padding: 28, display: "flex", flexDirection: "column", gap: 20 },
   header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" },
   title: { fontSize: 16, fontWeight: 700 },

@@ -1,8 +1,9 @@
 import { useEffect, useState, useCallback } from "react";
 import api from "../api/client";
-import { getTasks, runTask } from "../api/tasks";
+import { getTasks, runTask, dryRunTask } from "../api/tasks";
 import { getWorkflows } from "../api/workflows";
 import { getAgents } from "../api/agents";
+import { buildDomainColorMap, getDomainColor } from "../utils/colors";
 import {
   ReactFlow,
   Background,
@@ -15,18 +16,41 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
-// Color palette — one per agent slot, cycles if more than 8
+// Color palette — use shared domain colors
 const AGENT_COLORS = [
   "#6366f1", "#10b981", "#f59e0b", "#ef4444",
   "#8b5cf6", "#06b6d4", "#f97316", "#ec4899",
 ];
 const getAgentColor = (index) => AGENT_COLORS[index % AGENT_COLORS.length];
 
-// Custom node — white card with colored left border
+// Custom node — white card with colored left border + dry run status
 function AgentNode({ data }) {
   const color = data.color || "#6366f1";
+  const dryStatus = data.dryStatus || "idle"; // idle | running | success | error
+
+  const statusIndicator = {
+    idle:    null,
+    running: { bg: "#eff6ff", color: "#1a56db", label: "●", spin: true },
+    success: { bg: "#dcfce7", color: "#16a34a", label: "✓", spin: false },
+    error:   { bg: "#fef2f2", color: "#dc2626", label: "✕", spin: false },
+  }[dryStatus];
+
   return (
-    <div style={{ ...nodeStyle, borderLeft: `4px solid ${color}` }}>
+    <div
+      style={{
+        ...nodeStyle,
+        borderLeft: `4px solid ${color}`,
+        boxShadow: dryStatus === "running"
+          ? `0 0 0 2px #1a56db40, 0 2px 12px rgba(15,23,42,0.08)`
+          : dryStatus === "success"
+          ? `0 0 0 2px #16a34a40, 0 2px 12px rgba(15,23,42,0.08)`
+          : dryStatus === "error"
+          ? `0 0 0 2px #dc262640, 0 2px 12px rgba(15,23,42,0.08)`
+          : nodeStyle.boxShadow,
+        cursor: data.onNodeClick ? "pointer" : "default",
+      }}
+      onClick={() => data.onNodeClick?.(data)}
+    >
       <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: color }} />
       <div style={nodeHeader}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -35,7 +59,20 @@ function AgentNode({ data }) {
           </div>
           <div style={nodeTitle}>{data.name}</div>
         </div>
-        <button style={nodeRemoveBtn} onClick={(e) => { e.stopPropagation(); data.onRemove(data.id); }}>✕</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {statusIndicator && (
+            <span style={{
+              fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 20,
+              background: statusIndicator.bg, color: statusIndicator.color,
+              animation: statusIndicator.spin ? "nodePulse 1s ease-in-out infinite" : "none",
+            }}>
+              {statusIndicator.label} {dryStatus === "running" ? "Running" : dryStatus === "success" ? "Done" : "Error"}
+            </span>
+          )}
+          {!data.onNodeClick && (
+            <button style={nodeRemoveBtn} onClick={(e) => { e.stopPropagation(); data.onRemove(data.id); }}>✕</button>
+          )}
+        </div>
       </div>
       <div style={nodeAssigned}>
         <span style={{ ...nodeAssignedTag, background: color + "15", color }}>
@@ -44,6 +81,9 @@ function AgentNode({ data }) {
       </div>
       <div style={nodeMeta}>
         <span style={{ ...nodeMetaTag, background: color + "12", color }}>STEP {String(data.index + 1).padStart(2, "0")}</span>
+        {data.dryDuration && (
+          <span style={{ ...nodeMetaTag, background: "#f0fdf4", color: "#16a34a" }}>{data.dryDuration}ms</span>
+        )}
       </div>
       <Handle type="source" position={Position.Bottom} style={{ ...handleStyle, background: color }} />
     </div>
@@ -134,6 +174,95 @@ const dd = {
 
 const nodeTypes = { agentNode: AgentNode };
 
+function DryRunPanel({ result, selectedNode, onSelectNode, onClose }) {
+  return (
+    <div style={dr.wrap}>
+      <div style={dr.header}>
+        <div>
+          <div style={dr.title}>⚡ Dry Run Results — {result.task_name}</div>
+          <div style={dr.sub}>{result.nodes.length} agents · {result.total_ms}ms total · No real API calls made</div>
+        </div>
+        <button style={dr.closeBtn} onClick={onClose}>✕</button>
+      </div>
+
+      <div style={dr.body}>
+        {/* Node list */}
+        <div style={dr.nodeList}>
+          {result.nodes.map((node, i) => (
+            <div key={node.node_id}
+              style={{ ...dr.nodeItem, ...(selectedNode?.node_id === node.node_id ? dr.nodeItemActive : {}) }}
+              onClick={() => onSelectNode(selectedNode?.node_id === node.node_id ? null : node)}
+            >
+              <div style={{ ...dr.nodeStatus, background: node.status === "success" ? "#dcfce7" : "#fef2f2" }}>
+                {node.status === "success"
+                  ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
+                  : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                }
+              </div>
+              <div style={dr.nodeInfo}>
+                <div style={dr.nodeName}>{node.agent_name}</div>
+                <div style={dr.nodeMeta}>Step {i + 1} · {node.duration_ms}ms</div>
+              </div>
+              <div style={dr.nodeChevron}>{selectedNode?.node_id === node.node_id ? "▲" : "▼"}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Selected node output */}
+        {selectedNode && (
+          <div style={dr.outputPanel}>
+            <div style={dr.outputHeader}>
+              <span style={dr.outputTitle}>{selectedNode.agent_name}</span>
+              <span style={dr.outputDuration}>{selectedNode.duration_ms}ms</span>
+            </div>
+            {selectedNode.tool_calls?.length > 0 && (
+              <div style={dr.toolCalls}>
+                <div style={dr.toolCallsLabel}>TOOL CALLS</div>
+                {selectedNode.tool_calls.map((tc, i) => (
+                  <div key={i} style={dr.toolCall}>
+                    <span style={dr.toolName}>{tc.tool}</span>
+                    <span style={dr.toolResult}>{tc.result}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={dr.outputLabel}>OUTPUT</div>
+            <div style={dr.outputText}>{selectedNode.output}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const dr = {
+  wrap: { background: "#fff", borderRadius: 14, border: "1px solid #e2e8f0", boxShadow: "0 4px 24px rgba(15,23,42,0.08)", marginTop: 20, overflow: "hidden" },
+  header: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "16px 20px", borderBottom: "1px solid #f1f5f9", background: "#f8fafc" },
+  title: { fontSize: 14, fontWeight: 800, color: "#0f172a" },
+  sub: { fontSize: 11, color: "#64748b", marginTop: 3 },
+  closeBtn: { background: "none", border: "none", fontSize: 16, cursor: "pointer", color: "#94a3b8", padding: 4 },
+  body: { display: "grid", gridTemplateColumns: "240px 1fr" },
+  nodeList: { borderRight: "1px solid #f1f5f9", padding: 12, display: "flex", flexDirection: "column", gap: 4 },
+  nodeItem: { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, cursor: "pointer", transition: "background 150ms", border: "1px solid transparent" },
+  nodeItemActive: { background: "#eff6ff", border: "1px solid #bfdbfe" },
+  nodeStatus: { width: 24, height: 24, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  nodeInfo: { flex: 1, minWidth: 0 },
+  nodeName: { fontSize: 12, fontWeight: 700, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+  nodeMeta: { fontSize: 10, color: "#94a3b8", marginTop: 2 },
+  nodeChevron: { fontSize: 9, color: "#94a3b8" },
+  outputPanel: { padding: 20, display: "flex", flexDirection: "column", gap: 12 },
+  outputHeader: { display: "flex", justifyContent: "space-between", alignItems: "center" },
+  outputTitle: { fontSize: 14, fontWeight: 800, color: "#0f172a" },
+  outputDuration: { fontSize: 11, fontWeight: 700, color: "#6366f1", background: "#eff6ff", padding: "3px 10px", borderRadius: 20 },
+  toolCalls: { background: "#f8fafc", borderRadius: 8, padding: "10px 14px" },
+  toolCallsLabel: { fontSize: 9, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.06em", marginBottom: 8 },
+  toolCall: { display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 4 },
+  toolName: { fontSize: 11, fontWeight: 700, color: "#6366f1", background: "#eff6ff", padding: "2px 8px", borderRadius: 4, flexShrink: 0 },
+  toolResult: { fontSize: 11, color: "#64748b" },
+  outputLabel: { fontSize: 9, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.06em" },
+  outputText: { fontSize: 12, color: "#334155", lineHeight: 1.6, background: "#f8fafc", borderRadius: 8, padding: "12px 14px", whiteSpace: "pre-wrap" },
+};
+
 export default function TaskManagement() {
   const [tasks, setTasks] = useState([]);
   const [workflows, setWorkflows] = useState([]);
@@ -218,16 +347,20 @@ export default function TaskManagement() {
 
   const [toast, setToast] = useState(null);
   const [generating, setGenerating] = useState(false);
-  const [generateResult, setGenerateResult] = useState(null); // { suggested_agents, workflow_json }
+  const [generateResult, setGenerateResult] = useState(null);
+  const [dryRunResult, setDryRunResult] = useState(null); // { taskId, nodes, total_ms }
+  const [dryRunning, setDryRunning] = useState(null); // taskId currently dry running
+  const [selectedDryNode, setSelectedDryNode] = useState(null); // node clicked for inspection
 
   const showToast = (msg, ok = true) => {
     setToast({ msg, ok });
     setTimeout(() => setToast(null), 3000);
   };
 
-  // Stable color map — each agent gets a consistent color by its position in the sorted list
+  // Color map — agents get their domain's color for consistency with Agent Management page
+  const domainColorMap = buildDomainColorMap(domains.filter(d => d.name !== "SYSTEM"));
   const agentColorMap = {};
-  agents.forEach((a, i) => { agentColorMap[a.id] = getAgentColor(i); });
+  agents.forEach((a) => { agentColorMap[a.id] = domainColorMap[a.domain_id] || getAgentColor(0); });
 
   const handleGenerate = async () => {
     if (!form.description.trim()) {
@@ -284,7 +417,51 @@ export default function TaskManagement() {
 
 
 
+  const [editingTask, setEditingTask] = useState(null); // task being edited
+
   const isSelected = (agentId) => nodes.some((n) => n.data.agentId === agentId);
+
+  const handleEdit = (task) => {
+    const wf = getWorkflow(task.workflow_id);
+    const wfNodes = wf?.graph_json?.nodes || [];
+    const wfEdges = wf?.graph_json?.edges || [];
+
+    setForm({ name: task.name, description: task.description });
+    setEditingTask(task);
+    setTab("create");
+
+    // Rebuild React Flow nodes from workflow
+    const agentMap = {};
+    agents.forEach(a => { agentMap[a.id] = a; });
+
+    const newNodes = wfNodes.map((n, i) => {
+      const agent = agentMap[n.agent_id];
+      const nodeId = `node-${n.agent_id}-${Date.now()}-${i}`;
+      const color = agentColorMap[n.agent_id] || getAgentColor(0);
+      return {
+        id: nodeId,
+        type: "agentNode",
+        position: { x: 250, y: i * 180 },
+        data: { id: nodeId, agentId: n.agent_id, name: agent?.name || `Agent #${n.agent_id}`, index: i, color, onRemove: removeNode },
+        _graphNodeId: n.id,
+      };
+    });
+
+    const nodeGraphIdToFlowId = {};
+    wfNodes.forEach((n, i) => { nodeGraphIdToFlowId[n.id] = newNodes[i]?.id; });
+
+    const newEdges = wfEdges.map(e => ({
+      id: `e-${nodeGraphIdToFlowId[e.from]}-${nodeGraphIdToFlowId[e.to]}`,
+      source: nodeGraphIdToFlowId[e.from],
+      target: nodeGraphIdToFlowId[e.to],
+      animated: true,
+      style: { stroke: "#6366f1", strokeWidth: 2 },
+    })).filter(e => e.source && e.target);
+
+    setNodes(newNodes);
+    setEdges(newEdges);
+    setTimeout(() => rfInstance?.fitView({ padding: 0.3, duration: 300 }), 100);
+  };
 
   const handleDelete = async (taskId) => {
     try {
@@ -304,28 +481,32 @@ export default function TaskManagement() {
     setSaving(true);
     setError("");
     try {
-      // Build graph_json from React Flow nodes and edges
       const flowNodes = nodes.map((n, i) => ({ id: `n${i + 1}`, agent_id: n.data.agentId }));
-      // Map React Flow edge source/target to node IDs
       const nodeIdMap = {};
       nodes.forEach((n, i) => { nodeIdMap[n.id] = `n${i + 1}`; });
       const flowEdges = edges.map((e) => ({ from: nodeIdMap[e.source], to: nodeIdMap[e.target] })).filter((e) => e.from && e.to);
 
-      const wf = await api.post("/workflows", { name: form.name, graph_json: { nodes: flowNodes, edges: flowEdges } });
-      const task = await api.post("/tasks", {
-        name: form.name,
-        description: form.description,
-        workflow_id: wf.data.id,
-      });
-      setTasks((prev) => [...prev, task.data]);
+      if (editingTask) {
+        // Update existing workflow + task
+        await api.put(`/workflows/${editingTask.workflow_id}`, { name: form.name, graph_json: { nodes: flowNodes, edges: flowEdges } });
+        const updated = await api.put(`/tasks/${editingTask.id}`, { name: form.name, description: form.description });
+        setTasks(prev => prev.map(t => t.id === editingTask.id ? updated.data : t));
+        setEditingTask(null);
+        showToast("Task updated successfully");
+      } else {
+        const wf = await api.post("/workflows", { name: form.name, graph_json: { nodes: flowNodes, edges: flowEdges } });
+        const task = await api.post("/tasks", { name: form.name, description: form.description, workflow_id: wf.data.id });
+        setTasks(prev => [...prev, task.data]);
+        showToast("Task sequence published successfully");
+      }
+
       setNodes([]);
       setEdges([]);
       setForm({ name: "", description: "" });
       setTab("list");
-      showToast("Task sequence published successfully");
     } catch (e) {
       const d = e.response?.data?.detail;
-      setError(typeof d === "object" ? JSON.stringify(d) : d || "Error creating task sequence");
+      setError(typeof d === "object" ? JSON.stringify(d) : d || "Error saving task sequence");
     } finally {
       setSaving(false);
     }
@@ -339,6 +520,71 @@ export default function TaskManagement() {
       setTimeout(() => setRunStatus((s) => ({ ...s, [taskId]: "" })), 3000);
     } catch {
       setRunStatus((s) => ({ ...s, [taskId]: "error" }));
+    }
+  };
+
+  const handleDryRun = async (taskId) => {
+    setDryRunning(taskId);
+    setDryRunResult(null);
+    setSelectedDryNode(null);
+
+    // Switch to create tab to show canvas, load the task's workflow into canvas
+    const task = tasks.find(t => t.id === taskId);
+    if (task) {
+      handleEdit(task);
+    }
+
+    try {
+      // Animate nodes as "running" one by one while waiting
+      const wf = workflows.find(w => w.id === task?.workflow_id);
+      const wfNodes = wf?.graph_json?.nodes || [];
+
+      // Set all to idle first
+      setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, dryStatus: "idle", dryDuration: null } })));
+
+      // Kick off the actual dry run
+      const resultPromise = dryRunTask(taskId);
+
+      // Animate running state node by node (estimated timing)
+      for (let i = 0; i < wfNodes.length; i++) {
+        const graphNodeId = wfNodes[i].id;
+        setNodes(nds => nds.map((n, idx) => ({
+          ...n,
+          data: {
+            ...n.data,
+            dryStatus: idx === i ? "running" : idx < i ? "success" : "idle",
+          }
+        })));
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      const result = await resultPromise;
+      setDryRunResult({ taskId, ...result });
+
+      // Apply final statuses from real result
+      setNodes(nds => nds.map((n, idx) => {
+        const nodeResult = result.nodes[idx];
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            dryStatus: nodeResult?.status === "success" ? "success" : nodeResult ? "error" : "idle",
+            dryDuration: nodeResult?.duration_ms ?? null,
+            onNodeClick: (nodeData) => {
+              const nr = result.nodes.find((r) => r.agent_name === nodeData.name);
+              setSelectedDryNode(nr || null);
+            },
+          }
+        };
+      }));
+
+      showToast(`Dry run complete — ${result.nodes.length} nodes in ${result.total_ms}ms`);
+    } catch (e) {
+      const d = e.response?.data?.detail;
+      showToast(typeof d === "string" ? d : "Dry run failed", false);
+      setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, dryStatus: "error" } })));
+    } finally {
+      setDryRunning(null);
     }
   };
 
@@ -361,7 +607,7 @@ export default function TaskManagement() {
             {tab === "list" ? "+ New Sequence" : "View All Tasks"}
           </button>
           <button className="btn-primary" style={s.publishBtn} onClick={handlePublish} disabled={saving}>
-            {saving ? "Publishing..." : "Publish Sequence"}
+            {saving ? "Saving..." : editingTask ? "Save Changes" : "Publish Sequence"}
           </button>
         </div>
       </div>
@@ -405,12 +651,21 @@ export default function TaskManagement() {
                   >
                     {status === "queuing" ? "..." : status === "queued" ? "✓ Queued" : "▶ Run"}
                   </button>
+                  <button
+                    style={{ ...s.dryRunBtn, ...(dryRunning === task.id ? { opacity: 0.6 } : {}) }}
+                    onClick={() => handleDryRun(task.id)}
+                    disabled={dryRunning === task.id}
+                  >
+                    {dryRunning === task.id ? "⏳ Running..." : "⚡ Dry Run"}
+                  </button>
+                  <button style={s.editBtn} onClick={() => handleEdit(task)}>Edit</button>
                   <button style={s.deleteBtn} onClick={() => handleDelete(task.id)}>Delete</button>
                 </div>
               </div>
             );
           })}
         </div>
+
       ) : (
         <>
           {/* Task Meta Inputs */}
@@ -532,7 +787,7 @@ export default function TaskManagement() {
                   </div>
                 ) : (
                   <ReactFlow
-                    nodes={nodes.map((n) => ({ ...n, data: { ...n.data, onRemove: removeNode } }))}
+                    nodes={nodes.map((n) => ({ ...n, data: { ...n.data, onRemove: dryRunResult ? undefined : removeNode } }))}
                     edges={edges}
                     onNodesChange={onNodesChange}
                     onEdgesChange={onEdgesChange}
@@ -553,6 +808,19 @@ export default function TaskManagement() {
               </div>
             </div>
           </div>
+          {/* Dry Run Results Panel — shown below canvas after dry run */}
+          {dryRunResult && (
+            <DryRunPanel
+              result={dryRunResult}
+              selectedNode={selectedDryNode}
+              onSelectNode={setSelectedDryNode}
+              onClose={() => {
+                setDryRunResult(null);
+                setSelectedDryNode(null);
+                setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, dryStatus: "idle", dryDuration: null, onNodeClick: undefined } })));
+              }}
+            />
+          )}
         </>
       )}
       {toast && (
@@ -669,5 +937,6 @@ const s = {
   taskRowActions: { display: "flex", alignItems: "center", gap: 12 },
   nodeCount: { fontSize: 11, color: "var(--on-surface-variant)", fontWeight: 700 },
   runBtn: { background: "#16a34a", color: "#fff", padding: "7px 16px", borderRadius: 8, fontSize: 12, fontWeight: 700, border: "none", cursor: "pointer" },
+  editBtn: { background: "var(--surface-container-low)", color: "var(--on-surface)", border: "1px solid var(--outline)", padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" },
   deleteBtn: { background: "transparent", color: "#dc2626", border: "1px solid #dc262633", padding: "7px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" },
 };
