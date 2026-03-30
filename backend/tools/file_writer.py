@@ -16,11 +16,18 @@ def file_writer(input_data) -> str:
     if isinstance(input_data, str):
         return "Error: file_writer requires {'filename': '...', 'content': '...'}"
 
-    filename = input_data.get("filename") or input_data.get("file") or input_data.get("name")
+    filename = (
+        input_data.get("filename") or
+        input_data.get("file_name") or
+        input_data.get("file") or
+        input_data.get("name")
+    )
     content = input_data.get("content") or input_data.get("text") or input_data.get("data")
 
+    # Auto-generate filename if not provided
     if not filename:
-        return "Error: 'filename' is required for file_writer"
+        import time
+        filename = f"output_{int(time.time())}.md"
     if content is None:
         return "Error: 'content' is required for file_writer"
 
@@ -28,6 +35,12 @@ def file_writer(input_data) -> str:
     filename = os.path.basename(filename)
     if not filename:
         return "Error: invalid filename"
+
+    # If file already exists, append timestamp to avoid overwriting
+    if os.path.exists(os.path.join(UPLOAD_DIR, filename)):
+        import time
+        name, ext = os.path.splitext(filename)
+        filename = f"{name}_{int(time.time())}{ext}"
 
     try:
         os.makedirs(UPLOAD_DIR, exist_ok=True)

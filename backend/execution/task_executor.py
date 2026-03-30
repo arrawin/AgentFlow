@@ -272,9 +272,15 @@ RULES:
                             if not tool_fn:
                                 tool_result = f"Error: Tool '{tool_name}' not found. Available: {tool_list}"
                             else:
+                                # Inject task-based filename if file_writer has no filename
+                                if tool_name == "file_writer" and isinstance(tool_input, dict):
+                                    has_filename = tool_input.get("filename") or tool_input.get("file_name") or tool_input.get("file") or tool_input.get("name")
+                                    if not has_filename:
+                                        import re as _re2
+                                        safe = _re2.sub(r'[^a-z0-9]+', '_', task.name.lower()).strip('_')
+                                        tool_input["filename"] = f"{safe}.md"
                                 try:
                                     tool_result = tool_fn(tool_input)
-                                    # Track if file_writer was used successfully
                                     if tool_name == "file_writer" and "successfully" in str(tool_result):
                                         has_written_file = True
                                 except Exception as e:

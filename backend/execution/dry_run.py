@@ -1,43 +1,31 @@
 """
-Dry run execution — runs the full workflow with MockLLM and MockTools.
-No real API calls, no DB writes for results. Returns per-node timing and output.
+Dry run — runs the full workflow with the real LLM and real tools.
+No DB writes (no TaskRun/RunLog rows created). Returns per-node timing and output.
 """
 import time
+import json
+import re
+import os
 from db.database import SessionLocal
-from db.models import Agent, Task, Workflow
+from db.models import Agent, Task, Workflow, LLMConfig
 from validation.workflow_validator import validate_workflow
+from services.llm_service import LLMService
+from tools.registry import TOOLS
+from tools.utils import UPLOAD_DIR
 
 
-class MockLLM:
-    """Returns a canned response without calling any LLM API."""
-    def generate(self, prompt: str) -> str:
-        # Extract agent name from prompt if possible
-        name = "Agent"
-        for line in prompt.split("\n"):
-            if line.startswith("You are:"):
-                name = line.replace("You are:", "").strip()
-                break
-        return f"[Dry Run] {name} processed the task. This is a mock response — no real LLM call was made."
-
-
-class MockTool:
-    """Returns stub data for any tool call."""
-    @staticmethod
-    def call(tool_name: str, tool_input: dict) -> str:
-        stubs = {
-            "web_search":  "[Mock] Web search results: Found 5 relevant articles about the topic.",
-            "file_reader": "[Mock] File content: Sample file content returned by mock tool.",
-            "file_search": "[Mock] File search: Found 3 matching lines.",
-            "file_lines":  "[Mock] Lines 1-10: Sample content from the file.",
-            "file_writer": "[Mock] File written successfully (mock — no actual file created).",
-        }
-        return stubs.get(tool_name, f"[Mock] Tool '{tool_name}' returned stub data.")
+def _should_execute_tool(tool_history, tool_name, tool_input):
+    for t in tool_history:
+        if t["tool"] == tool_name and t["input"] == tool_input:
+            return False
+    return True
 
 
 def run_dry_run(task_id: int) -> dict:
     """
-    Execute a full workflow dry run synchronously.
-    Returns: { status, nodes: [{ node_id, agent_name, status, duration_ms, output }], total_ms }
+    Execute a full workflow dry run synchronously using the real LLM.
+    No TaskRun or RunLog rows are written.
+    Returns: { status, task_name, total_ms, nodes: [...], final_output }
     """
     db = SessionLocal()
     try:
@@ -55,10 +43,10 @@ def run_dry_run(task_id: int) -> dict:
         if errors:
             return {"status": "failed", "error": f"Workflow validation failed: {errors}", "nodes": []}
 
-        mock_llm = MockLLM()
         state = {
             "input": task.description,
             "intermediate_outputs": {},
+            "tool_history": [],
         }
 
         node_results = []
@@ -68,34 +56,124 @@ def run_dry_run(task_id: int) -> dict:
             node_id = node["id"]
             agent = db.query(Agent).filter(Agent.id == node["agent_id"]).first()
             agent_name = agent.name if agent else f"Agent #{node['agent_id']}"
-
             node_start = time.time()
+
             try:
-                # Build context from previous nodes
+                llm_config = db.query(LLMConfig).filter(LLMConfig.is_default == True).first()
+                llm = LLMService(llm_config=llm_config)
+
                 context = ""
                 for k, v in state["intermediate_outputs"].items():
                     context += f"--- {k} output ---\n{v}\n\n"
 
-                skills = agent.skills if agent else "No skills"
-                prompt = f"""You are: {agent_name}
-{skills}
+                skills_text = agent.skills if agent and agent.skills else "No specific skills"
+                all_tool_keys = list(TOOLS.keys())
+                tool_list = [t for t in (agent.allowed_tools or []) if t in TOOLS] if agent and agent.allowed_tools else all_tool_keys
 
-TASK: {state['input']}
+                available_files = os.listdir(UPLOAD_DIR) if os.path.exists(UPLOAD_DIR) else []
+                files_text = "\n".join([f"- {f}" for f in available_files]) or "No files available"
+
+                max_iterations = 8
+                iteration = 0
+                agent_result = ""
+                tool_calls_log = []
+
+                while iteration < max_iterations:
+                    iteration += 1
+
+                    if agent_result:
+                        instruction = "You have tool results above. Write your FINAL ANSWER as plain text now."
+                    else:
+                        tool_docs = "TOOL USAGE — respond with ONLY this raw JSON:\n{\"action\": \"tool_call\", \"tool_name\": \"<tool_name>\", \"input\": <input_object>}\n"
+                        if "web_search" in tool_list:
+                            tool_docs += '\n- web_search: {"query": "<search_term>"}'
+                        if "file_reader" in tool_list:
+                            tool_docs += '\n- file_reader: {"filename": "<filename>"}'
+                        if "file_writer" in tool_list:
+                            tool_docs += '\n- file_writer: {"filename": "<filename>", "content": "<content>"}'
+                        instruction = f"{tool_docs}\n\nAvailable tools: {tool_list}\nOtherwise write your FINAL ANSWER."
+
+                    prompt = f"""You are: {agent_name}
+{skills_text}
+
+TASK:
+{state['input']}
 
 CONTEXT FROM PREVIOUS AGENTS:
-{context if context else "None"}"""
+{context if context else "None"}
 
-                output = mock_llm.generate(prompt)
+YOUR TOOL RESULTS SO FAR:
+{agent_result if agent_result else "None"}
 
-                # Simulate tool call detection — check if agent has tools
-                tool_calls = []
-                if agent and agent.allowed_tools:
-                    for tool in agent.allowed_tools[:1]:  # mock one tool call
-                        tool_result = MockTool.call(tool, {})
-                        tool_calls.append({"tool": tool, "result": tool_result})
-                        output += f"\n\n[Tool: {tool}] {tool_result}"
+AVAILABLE FILES:
+{files_text}
 
-                state["intermediate_outputs"][node_id] = output
+{instruction}
+"""
+                    result = llm.generate(prompt)
+                    if not result:
+                        result = "Error: No response from LLM"
+                        break
+
+                    # Parse tool call
+                    clean = re.sub(r"```(?:json)?", "", result).replace("```", "")
+                    tool_call = None
+                    try:
+                        for i, c in enumerate(clean):
+                            if c == '{':
+                                depth = 0
+                                for j, ch in enumerate(clean[i:]):
+                                    if ch == '{': depth += 1
+                                    elif ch == '}':
+                                        depth -= 1
+                                        if depth == 0:
+                                            candidate = clean[i:i+j+1]
+                                            try:
+                                                parsed = json.loads(candidate)
+                                                if parsed.get("tool_name") and (parsed.get("action") == "tool_call" or parsed.get("action") in TOOLS):
+                                                    tool_call = parsed
+                                                elif not parsed.get("tool_name") and parsed.get("action") in TOOLS:
+                                                    parsed["tool_name"] = parsed["action"]
+                                                    parsed["action"] = "tool_call"
+                                                    tool_call = parsed
+                                            except Exception:
+                                                pass
+                                            break
+                                if tool_call:
+                                    break
+                    except Exception:
+                        pass
+
+                    if tool_call:
+                        tool_name = tool_call.get("tool_name")
+                        tool_input = tool_call.get("input", {})
+
+                        if tool_name not in tool_list:
+                            agent_result += f"\nTool '{tool_name}' not allowed.\n"
+                            continue
+
+                        if not _should_execute_tool(state["tool_history"], tool_name, tool_input):
+                            agent_result += f"\nDuplicate tool call blocked.\n"
+                            continue
+
+                        tool_fn = TOOLS.get(tool_name)
+                        if tool_fn:
+                            try:
+                                tool_result = tool_fn(tool_input)
+                            except Exception as e:
+                                tool_result = f"Tool error: {str(e)}"
+                        else:
+                            tool_result = f"Tool '{tool_name}' not found."
+
+                        state["tool_history"].append({"tool": tool_name, "input": tool_input})
+                        tool_calls_log.append({"tool": tool_name, "result": str(tool_result)[:300]})
+                        agent_result += f"\nTool '{tool_name}' result:\n{tool_result}\n"
+                        continue
+
+                    agent_result = result
+                    break
+
+                state["intermediate_outputs"][node_id] = agent_result
                 duration_ms = int((time.time() - node_start) * 1000)
 
                 node_results.append({
@@ -104,8 +182,8 @@ CONTEXT FROM PREVIOUS AGENTS:
                     "agent_id": node["agent_id"],
                     "status": "success",
                     "duration_ms": duration_ms,
-                    "output": output,
-                    "tool_calls": tool_calls,
+                    "output": agent_result,
+                    "tool_calls": tool_calls_log,
                 })
 
             except Exception as e:

@@ -1,100 +1,41 @@
-# Docker Sandboxes
+Decision
+LLM orchestration runs in the Celery worker.
+Tool execution that involves untrusted or heavy operations runs inside Docker containers.
+Celery Worker (outside Docker)
+    ↓
+LangGraph graph execution
+    ↓
+LLM calls → Groq API
+    ↓
+Agent decides to use a tool
+    ↓
+Safe tools → run directly (web_search, file_reader)
+Unsafe tools → run inside Docker container (run_python)
+
+Why This Approach
+
+LLM calls require network access to Groq API
+Giving containers network access is a security risk
+Only tool execution that runs untrusted logic needs sandboxing
+This is the industry standard pattern (LangGraph, LangChain, Zapier all follow this)
 
 
-
-
-Docker Sandboxes lets you run AI coding agents in isolated environments on your
-machine. Sandboxes provides a secure way to give agents autonomy without
-compromising your system.
-
-## Why use Docker Sandboxes
-
-AI agents need to execute commands, install packages, and test code. Running
-them directly on your host machine means they have full access to your files,
-processes, and network. Docker Sandboxes isolates agents in microVMs, each with
-its own Docker daemon. Agents can spin up test containers and modify their
-environment without affecting your host.
-
-You get:
-
-- Agent autonomy without host system risk
-- YOLO mode by default - agents work without asking permission
-- Private Docker daemon for running test containers
-- File sharing between host and sandbox
-- Network access control
-
-For a comparison between Docker Sandboxes and other approaches to isolating
-coding agents, see [Comparison to alternatives](/ai/architecture/#comparison-to-alternatives).
-
-> [!NOTE]
-> MicroVM-based sandboxes require macOS or Windows (experimental). Linux users
-> can use legacy container-based sandboxes with
-> [Docker Desktop 4.57](/desktop/release-notes/#4570).
-
-## How to use sandboxes
-
-To create and run a sandbox:
-
-```console
-$ cd ~/my-project
-$ docker sandbox run claude
-```
-
-Replace `claude` with your [preferred agent](/ai/agents/). This command
-creates a sandbox for your workspace (`~/my-project`) and starts the agent. The
-agent can now work with your code, install tools, and run containers inside the
-isolated sandbox.
-
-## How it works
-
-Sandboxes run in lightweight microVMs with private Docker daemons. Each sandbox
-is completely isolated - the agent runs inside the VM and can't access your
-host Docker daemon, containers, or files outside the workspace.
-
-Your workspace directory syncs between host and sandbox at the same absolute
-path, so file paths in error messages match between environments.
-
-Sandboxes don't appear in `docker ps` on your host because they're VMs, not
-containers. Use `docker sandbox ls` to see them.
-
-For technical details on the architecture, isolation model, and networking, see
-[Architecture](/ai/sandboxes/architecture/).
-
-### Multiple sandboxes
-
-Create separate sandboxes for different projects:
-
-```console
-$ docker sandbox run claude ~/project-a
-$ docker sandbox run claude ~/project-b
-```
-
-Each sandbox is completely isolated from the others. Sandboxes persist until
-you remove them, so installed packages and configuration stay available for
-that workspace.
-
-## Supported agents
-
-Docker Sandboxes works with multiple AI coding agents:
-
-- **Claude Code** - Anthropic's coding agent (production-ready)
-- **Codex** - OpenAI's Codex agent (in development)
-- **Copilot** - GitHub Copilot agent (in development)
-- **Gemini** - Google's Gemini agent (in development)
-- **OpenCode** - Multi-provider agent with TUI interface (in development)
-- **[Docker Agent](/ai/docker-agent/)** - Docker's multi-provider coding agent (in development)
-- **Kiro** - Interactive agent with device flow auth (in development)
-- **Shell** - Minimal sandbox for manual agent installation
-
-For detailed configuration instructions, see [Supported agents](/ai/sandboxes/agents).
-
-## Get started
-
-Head to the [Get started guide](/ai/sandboxes/get-started/) to run your first sandboxed agent.
-
-## Troubleshooting
-
-See [Troubleshooting](/ai/troubleshooting) for common configuration errors, or
-report issues on the [Docker Desktop issue tracker](https://github.com/docker/desktop-feedback).
-
-n
+Architecture
+task_executor.py (Celery worker)
+    ↓
+LangGraph StateGraph built from workflow graph_json
+    ↓
+For each node:
+    fetch agent from DB
+    build prompt from skills + state
+    call Groq LLM
+    parse response (action + tool_name + input)
+    ↓
+    if action == "final_answer":
+        write to state
+    if action == "tool_call":
+        route to tool registry
+        ↓
+        web_search → call Tavily directly (no Docker)
+        file_reader → read workspace file (no Docker)
+        run_python → spawn Docker container (isolated)

@@ -85,6 +85,34 @@ export default function Scheduler() {
 
   const getTaskName = (id) => tasks.find(t => t.id === id)?.name || `Task #${id}`;
 
+  // Compute next N fire times from a cron expression
+  const getNextRuns = (scheduleList, count = 8) => {
+    const upcoming = [];
+    const now = new Date();
+    scheduleList.filter(sc => sc.enabled && sc.trigger_type === "cron" && sc.cron_expression).forEach(sc => {
+      const parts = sc.cron_expression.trim().split(" ");
+      if (parts.length !== 5) return;
+      const [min, hour] = parts;
+      // Simple next-fire calculation for common patterns
+      for (let offset = 1; offset <= 60 * 24; offset++) {
+        const candidate = new Date(now.getTime() + offset * 60000);
+        const m = candidate.getMinutes();
+        const h = candidate.getHours();
+        const minMatch = min === "*" || min.startsWith("*/") ? (min === "*" || m % parseInt(min.slice(2)) === 0) : parseInt(min) === m;
+        const hourMatch = hour === "*" || parseInt(hour) === h;
+        if (minMatch && hourMatch) {
+          (sc.task_ids || []).forEach(tid => {
+            upcoming.push({ time: candidate, taskId: tid, scheduleName: sc.name, scheduleId: sc.id });
+          });
+          break;
+        }
+      }
+    });
+    return upcoming.sort((a, b) => a.time - b.time).slice(0, count);
+  };
+
+  const upcomingRuns = getNextRuns(schedules);
+
   // Stats
   const enabled = schedules.filter(s => s.enabled).length;
   const successRuns = runs.filter(r => r.status === "completed").length;
@@ -175,27 +203,30 @@ export default function Scheduler() {
           </table>
         </div>
 
-        {/* Queue Sidebar */}
+        {/* Upcoming Queue Sidebar */}
         <div style={s.queueCard}>
           <div style={s.cardHeader}>
-            <span style={s.cardTitle}>🔄 Queue</span>
+            <span style={s.cardTitle}>⏱ Upcoming</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>{upcomingRuns.length} queued</span>
           </div>
-          {scheduledRuns.length === 0 ? (
-            <div style={s.queueEmpty}>No scheduled runs yet.</div>
-          ) : scheduledRuns.slice(0, 5).map(run => (
-            <div key={run.id} style={s.queueItem}>
-              <div style={s.queueTime}>{new Date(run.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</div>
-              <div style={s.queueBody}>
-                <div style={s.queueName}>{getTaskName(run.task_id)}</div>
-                <div style={s.queueMeta}>
-                  <span style={{ ...s.queueStatus, color: run.status === "completed" ? "#16a34a" : run.status === "failed" ? "#ef4444" : "#f59e0b" }}>
-                    ● {run.status}
-                  </span>
+          {upcomingRuns.length === 0 ? (
+            <div style={s.queueEmpty}>No active schedules. Enable a schedule to see upcoming runs.</div>
+          ) : upcomingRuns.map((run, i) => {
+            const mins = Math.round((run.time - new Date()) / 60000);
+            return (
+              <div key={i} style={s.queueItem}>
+                <div style={s.queueTimeBadge}>
+                  <div style={s.queueTimeVal}>{run.time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</div>
+                  <div style={s.queueTimeIn}>in {mins}m</div>
                 </div>
+                <div style={s.queueBody}>
+                  <div style={s.queueName}>{getTaskName(run.taskId)}</div>
+                  <div style={s.queueMeta}>{run.scheduleName}</div>
+                </div>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#1a56db", flexShrink: 0, marginTop: 4 }} />
               </div>
-            </div>
-          ))}
-          <button style={s.viewPipelineBtn}>VIEW FULL PIPELINE</button>
+            );
+          })}
         </div>
       </div>
 
@@ -354,7 +385,9 @@ const s = {
   queueCard: { background: "#fff", borderRadius: 14, boxShadow: "0 1px 8px rgba(15,23,42,0.06)", border: "1px solid #f1f5f9", padding: "0 0 16px", display: "flex", flexDirection: "column" },
   queueEmpty: { padding: "24px 20px", fontSize: 12, color: "#94a3b8", textAlign: "center" },
   queueItem: { display: "flex", gap: 12, padding: "12px 20px", borderBottom: "1px solid #f8fafc", alignItems: "flex-start" },
-  queueTime: { fontSize: 16, fontWeight: 800, color: "#6366f1", minWidth: 44, lineHeight: 1.2 },
+  queueTimeBadge: { display: "flex", flexDirection: "column", alignItems: "center", minWidth: 44 },
+  queueTimeVal: { fontSize: 13, fontWeight: 800, color: "#1a56db", lineHeight: 1.2 },
+  queueTimeIn: { fontSize: 9, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.04em" },
   queueBody: { flex: 1 },
   queueName: { fontSize: 12, fontWeight: 700, color: "#0f172a" },
   queueMeta: { marginTop: 2 },

@@ -4,6 +4,7 @@ import { getTasks, runTask, dryRunTask } from "../api/tasks";
 import { getWorkflows } from "../api/workflows";
 import { getAgents } from "../api/agents";
 import { buildDomainColorMap, getDomainColor } from "../utils/colors";
+import { MarkdownLight } from "../components/MarkdownOutput";
 import {
   ReactFlow,
   Background,
@@ -26,61 +27,84 @@ const getAgentColor = (index) => AGENT_COLORS[index % AGENT_COLORS.length];
 // Custom node — white card with colored left border + dry run status
 function AgentNode({ data }) {
   const color = data.color || "#6366f1";
-  const dryStatus = data.dryStatus || "idle"; // idle | running | success | error
+  const dryStatus = data.dryStatus || "idle";
 
-  const statusIndicator = {
+  const statusColor = {
     idle:    null,
-    running: { bg: "#eff6ff", color: "#1a56db", label: "●", spin: true },
-    success: { bg: "#dcfce7", color: "#16a34a", label: "✓", spin: false },
-    error:   { bg: "#fef2f2", color: "#dc2626", label: "✕", spin: false },
+    running: "#1a56db",
+    success: "#16a34a",
+    error:   "#dc2626",
   }[dryStatus];
+
+  const isRunMode = dryStatus !== "idle";
+  const borderColor = isRunMode ? statusColor : color;
+  const borderWidth = isRunMode ? 2 : 4;
+  const borderStyle = isRunMode ? "solid" : "solid";
 
   return (
     <div
       style={{
         ...nodeStyle,
-        borderLeft: `4px solid ${color}`,
+        borderLeft: `${borderWidth}px ${borderStyle} ${borderColor}`,
+        borderTop:    isRunMode ? `${borderWidth}px solid ${borderColor}` : "1px solid #e2e8f0",
+        borderRight:  isRunMode ? `${borderWidth}px solid ${borderColor}` : "1px solid #e2e8f0",
+        borderBottom: isRunMode ? `${borderWidth}px solid ${borderColor}` : "1px solid #e2e8f0",
         boxShadow: dryStatus === "running"
-          ? `0 0 0 2px #1a56db40, 0 2px 12px rgba(15,23,42,0.08)`
+          ? `0 0 0 3px ${statusColor}30, 0 2px 12px rgba(15,23,42,0.08)`
           : dryStatus === "success"
-          ? `0 0 0 2px #16a34a40, 0 2px 12px rgba(15,23,42,0.08)`
+          ? `0 0 0 2px ${statusColor}25, 0 2px 12px rgba(15,23,42,0.08)`
           : dryStatus === "error"
-          ? `0 0 0 2px #dc262640, 0 2px 12px rgba(15,23,42,0.08)`
+          ? `0 0 0 2px ${statusColor}25, 0 2px 12px rgba(15,23,42,0.08)`
           : nodeStyle.boxShadow,
         cursor: data.onNodeClick ? "pointer" : "default",
+        transition: "border-color 300ms ease, box-shadow 300ms ease",
       }}
       onClick={() => data.onNodeClick?.(data)}
     >
-      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: color }} />
+      <Handle type="target" position={Position.Top} style={{ ...handleStyle, background: isRunMode ? statusColor : color }} />
       <div style={nodeHeader}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 7, background: color + "20", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, color }}>
+          <div style={{
+            width: 28, height: 28, borderRadius: 7,
+            background: color + "20",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 12, fontWeight: 800,
+            color: color,
+          }}>
             {data.name[0]}
           </div>
           <div style={nodeTitle}>{data.name}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {statusIndicator && (
-            <span style={{
-              fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 20,
-              background: statusIndicator.bg, color: statusIndicator.color,
-              animation: statusIndicator.spin ? "nodePulse 1s ease-in-out infinite" : "none",
-            }}>
-              {statusIndicator.label} {dryStatus === "running" ? "Running" : dryStatus === "success" ? "Done" : "Error"}
+          {dryStatus === "running" && (
+            <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 20, background: "#dbeafe", color: "#1a56db", animation: "nodePulse 1s ease-in-out infinite" }}>
+              ● Running
             </span>
           )}
-          {!data.onNodeClick && (
-            <button style={nodeRemoveBtn} onClick={(e) => { e.stopPropagation(); data.onRemove(data.id); }}>✕</button>
+          {dryStatus === "success" && (
+            <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 20, background: "#dcfce7", color: "#16a34a" }}>
+              ✓ Done
+            </span>
+          )}
+          {dryStatus === "error" && (
+            <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 20, background: "#fef2f2", color: "#dc2626" }}>
+              ✕ Error
+            </span>
+          )}
+          {!isRunMode && (
+            <button style={nodeRemoveBtn} onClick={(e) => { e.stopPropagation(); data.onRemove?.(data.id); }}>✕</button>
           )}
         </div>
       </div>
       <div style={nodeAssigned}>
         <span style={{ ...nodeAssignedTag, background: color + "15", color }}>
-          Assigned to: {data.name}
+          {data.name}
         </span>
       </div>
       <div style={nodeMeta}>
-        <span style={{ ...nodeMetaTag, background: color + "12", color }}>STEP {String(data.index + 1).padStart(2, "0")}</span>
+        <span style={{ ...nodeMetaTag, background: color + "12", color }}>
+          STEP {String(data.index + 1).padStart(2, "0")}
+        </span>
         {data.dryDuration && (
           <span style={{ ...nodeMetaTag, background: "#f0fdf4", color: "#16a34a" }}>{data.dryDuration}ms</span>
         )}
@@ -227,7 +251,7 @@ function DryRunPanel({ result, selectedNode, onSelectNode, onClose }) {
               </div>
             )}
             <div style={dr.outputLabel}>OUTPUT</div>
-            <div style={dr.outputText}>{selectedNode.output}</div>
+            <div style={dr.outputText}><MarkdownLight text={selectedNode.output} /></div>
           </div>
         )}
       </div>
@@ -348,9 +372,11 @@ export default function TaskManagement() {
   const [toast, setToast] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [generateResult, setGenerateResult] = useState(null);
-  const [dryRunResult, setDryRunResult] = useState(null); // { taskId, nodes, total_ms }
-  const [dryRunning, setDryRunning] = useState(null); // taskId currently dry running
-  const [selectedDryNode, setSelectedDryNode] = useState(null); // node clicked for inspection
+  const [dryRunResult, setDryRunResult] = useState(null);
+  const [dryRunning, setDryRunning] = useState(null);
+  const [selectedDryNode, setSelectedDryNode] = useState(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [canvasMode, setCanvasMode] = useState("edit"); // "edit" | "dryrun"
 
   const showToast = (msg, ok = true) => {
     setToast({ msg, ok });
@@ -527,6 +553,7 @@ export default function TaskManagement() {
     setDryRunning(taskId);
     setDryRunResult(null);
     setSelectedDryNode(null);
+    setCanvasMode("dryrun");
 
     // Switch to create tab to show canvas, load the task's workflow into canvas
     const task = tasks.find(t => t.id === taskId);
@@ -741,9 +768,9 @@ export default function TaskManagement() {
           )}
 
           {/* Two-Column Workspace */}
-          <div style={s.workspace}>
-            {/* Left: Agent Selection - grouped by domain */}
-            <div style={s.agentPanel}>
+          <div style={{ ...s.workspace, ...(isFullscreen ? s.workspaceFull : {}) }}>
+            {/* Left: Agent Selection - hidden in fullscreen */}
+            {!isFullscreen && <div style={s.agentPanel}>
               <div style={s.panelHeader}>
                 <span style={s.panelTitle}>Agent Selection</span>
                 {nodes.length > 0 && (
@@ -769,17 +796,45 @@ export default function TaskManagement() {
                 })}
               </div>
             </div>
+            }
 
             {/* Right: React Flow Canvas */}
-            <div style={s.canvasPanel}>
-              <div style={s.canvasHeader}>
-                <span style={s.panelTitle}>Workflow Canvas</span>
-                <div style={s.canvasStats}>
-                  <span style={s.canvasStat}>● {nodes.length} Nodes</span>
-                  <span style={s.canvasStat}>◌ {edges.length} Connections</span>
+            <div style={{ ...s.canvasPanel, ...(isFullscreen ? s.canvasPanelFull : {}) }}>
+              {/* n8n-style toolbar */}
+              <div style={s.canvasToolbar}>
+                <div style={s.toolbarLeft}>
+                  {isFullscreen && (
+                    <span style={s.toolbarTitle}>{form.name || "Workflow Canvas"}</span>
+                  )}
+                  <div style={s.modeToggle}>
+                    <button
+                      style={{ ...s.modeToggleBtn, ...(canvasMode === "edit" ? s.modeToggleBtnActive : {}) }}
+                      onClick={() => setCanvasMode("edit")}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                      Edit
+                    </button>
+                    <button
+                      style={{ ...s.modeToggleBtn, ...(canvasMode === "dryrun" ? s.modeToggleBtnDry : {}) }}
+                      onClick={() => canvasMode !== "dryrun" && tasks.length > 0 && handleDryRun(tasks.find(t => t.name === form.name)?.id)}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                      {dryRunning ? "Running..." : "Dry Run"}
+                    </button>
+                  </div>
+                </div>
+                <div style={s.toolbarRight}>
+                  <span style={s.canvasStat}>● {nodes.length} nodes</span>
+                  <span style={s.canvasStat}>◌ {edges.length} edges</span>
+                  <button style={s.fullscreenBtn} onClick={() => setIsFullscreen(f => !f)} title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+                    {isFullscreen
+                      ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3"/></svg>
+                      : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3H5a2 2 0 00-2 2v3m18 0V5a2 2 0 00-2-2h-3m0 18h3a2 2 0 002-2v-3M3 16v3a2 2 0 002 2h3"/></svg>
+                    }
+                  </button>
                 </div>
               </div>
-              <div style={{ flex: 1, borderRadius: 10, overflow: "hidden", minHeight: 420, background: "#f8fafc" }}>
+              <div style={{ flex: 1, overflow: "hidden", minHeight: isFullscreen ? "calc(100vh - 45px)" : 420, background: "#f8fafc" }}>
                 {nodes.length === 0 ? (
                   <div style={s.emptyCanvas}>
                     <div style={s.emptyCanvasIcon}>⬡</div>
@@ -817,6 +872,7 @@ export default function TaskManagement() {
               onClose={() => {
                 setDryRunResult(null);
                 setSelectedDryNode(null);
+                setCanvasMode("edit");
                 setNodes(nds => nds.map(n => ({ ...n, data: { ...n.data, dryStatus: "idle", dryDuration: null, onNodeClick: undefined } })));
               }}
             />
@@ -874,6 +930,7 @@ const s = {
 
   // Workspace
   workspace: { display: "grid", gridTemplateColumns: "280px 1fr", gap: 20 },
+  workspaceFull: { display: "block" },
 
   // Agent Panel
   agentPanel: { background: "#fff", borderRadius: 14, padding: 20, boxShadow: "0 1px 8px rgba(15,23,42,0.06)", display: "flex", flexDirection: "column", border: "1px solid #e2e8f0" },
@@ -892,8 +949,18 @@ const s = {
   registerBtn: { background: "var(--surface-container-low)", color: "var(--on-surface-variant)", padding: "10px", borderRadius: 8, fontSize: 12, fontWeight: 700, width: "100%", border: "none", cursor: "pointer" },
 
   // Canvas Panel
-  canvasPanel: { background: "#f8fafc", borderRadius: 14, padding: 24, display: "flex", flexDirection: "column", minHeight: 480, border: "1px solid #e2e8f0" },
+  canvasPanel: { background: "#f8fafc", borderRadius: 14, display: "flex", flexDirection: "column", minHeight: 480, border: "1px solid #e2e8f0", overflow: "hidden" },
+  canvasPanelFull: { position: "fixed", inset: 0, zIndex: 200, borderRadius: 0, minHeight: "100vh", border: "none" },
   canvasHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 },
+  canvasToolbar: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#fff", borderBottom: "1px solid #e2e8f0", flexShrink: 0 },
+  toolbarLeft: { display: "flex", alignItems: "center", gap: 12 },
+  toolbarRight: { display: "flex", alignItems: "center", gap: 10 },
+  toolbarTitle: { fontSize: 13, fontWeight: 700, color: "#0f172a" },
+  modeToggle: { display: "flex", background: "#f1f5f9", borderRadius: 8, padding: 3, gap: 2 },
+  modeToggleBtn: { fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 6, border: "none", background: "transparent", color: "#64748b", cursor: "pointer", display: "flex", alignItems: "center", gap: 5, transition: "all 150ms" },
+  modeToggleBtnActive: { background: "#fff", color: "#0f172a", boxShadow: "0 1px 3px rgba(15,23,42,0.1)" },
+  modeToggleBtnDry: { background: "#fff", color: "#ea6c00", boxShadow: "0 1px 3px rgba(15,23,42,0.1)" },
+  fullscreenBtn: { background: "transparent", border: "1px solid #e2e8f0", borderRadius: 6, padding: "5px 8px", cursor: "pointer", color: "#64748b", display: "flex", alignItems: "center" },
   canvasStats: { display: "flex", gap: 12 },
   canvasStat: { fontSize: 11, fontWeight: 700, color: "var(--on-surface-variant)" },
   canvas: { flex: 1, position: "relative" },

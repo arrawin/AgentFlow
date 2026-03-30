@@ -5,6 +5,19 @@ from db.models import Schedule
 from api.schemas.schedule import ScheduleCreate, ScheduleUpdate, ScheduleResponse
 from execution.celery_app import register_schedules
 from typing import List
+import subprocess
+
+
+def _reload_beat():
+    """Restart the celery_beat container so it picks up new schedules."""
+    try:
+        subprocess.Popen(
+            ["docker", "restart", "docker-celery_beat-1"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        print(f"[beat reload] Could not restart beat container: {e}")
 
 router = APIRouter()
 
@@ -31,6 +44,7 @@ def create_schedule(payload: ScheduleCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(schedule)
     register_schedules()
+    _reload_beat()
     return schedule
 
 
@@ -57,6 +71,7 @@ def update_schedule(schedule_id: int, update: ScheduleUpdate, db: Session = Depe
     db.commit()
     db.refresh(schedule)
     register_schedules()
+    _reload_beat()
     return schedule
 
 
@@ -68,6 +83,7 @@ def delete_schedule(schedule_id: int, db: Session = Depends(get_db)):
     db.delete(schedule)
     db.commit()
     register_schedules()
+    _reload_beat()
     return {"message": "Schedule deleted"}
 
 
