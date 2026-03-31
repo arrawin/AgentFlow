@@ -16,10 +16,18 @@ celery_app.conf.update(
     result_serializer='json',
     timezone='UTC',
     enable_utc=True,
+    beat_schedule={
+        "poll-triggers-every-30s": {
+            "task": "execution.trigger_poller.poll_triggers",
+            "schedule": 30.0,
+        }
+    }
 )
 
 # Import task module to register tasks
 from execution import task_executor
+from execution import trigger_poller
+from execution import container_runner
 
 
 def register_schedules():
@@ -57,7 +65,10 @@ def register_schedules():
                 except Exception as e:
                     print(f"[beat] Failed to register schedule {sc.id}: {e}")
 
-        celery_app.conf.beat_schedule = beat_schedule
+        # Merge with existing static schedules (don't overwrite poll-triggers)
+        existing = dict(celery_app.conf.beat_schedule or {})
+        existing.update(beat_schedule)
+        celery_app.conf.beat_schedule = existing
         print(f"[beat] Registered {len(beat_schedule)} cron job(s)")
     except Exception as e:
         print(f"[beat] register_schedules error: {e}")

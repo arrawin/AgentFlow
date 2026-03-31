@@ -13,6 +13,7 @@ from api.routes.llm_configs import router as llm_configs_router
 from api.routes.schedules import router as schedules_router
 from api.routes.dashboard import router as dashboard_router
 from api.routes.tools import router as tools_router
+from api.routes.internal import router as internal_router
 
 app = FastAPI(title="Workflow Orchestration API")
 
@@ -33,10 +34,6 @@ seed_workflow_architect()
 # Register cron schedules with Celery Beat
 register_schedules()
 
-# Register cron schedules with Celery Beat
-from execution.celery_app import register_schedules
-register_schedules()
-
 app.include_router(domains_router, prefix="/api", tags=["domains"])
 app.include_router(agents_router, prefix="/api", tags=["agents"])
 app.include_router(workflows_router, prefix="/api", tags=["workflows"])
@@ -47,6 +44,7 @@ app.include_router(llm_configs_router, prefix="/api", tags=["llm-configs"])
 app.include_router(schedules_router, prefix="/api", tags=["schedules"])
 app.include_router(dashboard_router, prefix="/api", tags=["dashboard"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])
+app.include_router(internal_router, tags=["internal"])
 
 
 @app.get("/")

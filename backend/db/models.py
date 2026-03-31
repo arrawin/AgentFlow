@@ -70,11 +70,24 @@ class Schedule(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String)
-    trigger_type = Column(String, default="cron")   # cron | email
+    trigger_type = Column(String, default="cron")   # cron | folder_watch | file_watch | email
     cron_expression = Column(String, nullable=True)
-    task_ids = Column(JSON, default=list)            # list of task IDs
+    task_ids = Column(JSON, default=list)
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Folder/file watch config
+    watch_path = Column(String, nullable=True)       # e.g. "/app/uploads/watch"
+    file_pattern = Column(String, nullable=True)     # e.g. "*.csv" or "report_*.txt"
+    last_seen_files = Column(JSON, default=list)     # tracks already-processed files
+
+    # Email (IMAP) config
+    imap_host = Column(String, nullable=True)
+    imap_port = Column(Integer, nullable=True, default=993)
+    imap_user = Column(String, nullable=True)
+    imap_password_encrypted = Column(String, nullable=True)
+    subject_filter = Column(String, nullable=True)
+    sender_filter = Column(String, nullable=True)
 
 
 class TaskRun(Base):

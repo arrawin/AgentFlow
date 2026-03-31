@@ -19,15 +19,17 @@ function cronHuman(expr) {
   return match?.value ? match.label : expr;
 }
 
-const EMPTY_FORM = { name: "", trigger_type: "cron", cron_expression: "0 9 * * *", task_ids: [], enabled: true };
+const EMPTY_FORM = {
+  name: "", trigger_type: "cron", cron_expression: "0 9 * * *", task_ids: [], enabled: true,
+  watch_path: "", file_pattern: "*",
+  imap_host: "", imap_port: 993, imap_user: "", imap_password: "", subject_filter: "", sender_filter: "",
+};
 
 const TRIGGER_ICONS = {
-  cron: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-  ),
-  email: (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-  ),
+  cron: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+  email: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>,
+  folder_watch: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>,
+  file_watch: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>,
 };
 
 export default function Scheduler() {
@@ -66,12 +68,17 @@ export default function Scheduler() {
   const handleSave = async () => {
     if (!form.name.trim()) { setError("Name is required"); return; }
     if (form.trigger_type === "cron" && !form.cron_expression.trim()) { setError("Cron expression is required"); return; }
+    if ((form.trigger_type === "folder_watch" || form.trigger_type === "file_watch") && !form.watch_path.trim()) { setError("Watch path is required"); return; }
+    if (form.trigger_type === "email" && !form.imap_host.trim()) { setError("IMAP host is required"); return; }
     setSaving(true); setError("");
     try {
       if (editId) { await updateSchedule(editId, form); showToast("Schedule updated"); }
       else { await createSchedule(form); showToast("Schedule created"); }
       setShowForm(false); load();
-    } catch (e) { setError(e.response?.data?.detail || "Error saving schedule"); }
+    } catch (e) {
+      console.error("Schedule save error:", e);
+      setError(e.response?.data?.detail || e.message || "Error saving schedule");
+    }
     finally { setSaving(false); }
   };
 
@@ -177,12 +184,15 @@ export default function Scheduler() {
                     </div>
                   </td>
                   <td style={s.tdCell}>
-                    <span style={{ ...s.typePill, background: sc.trigger_type === "cron" ? "#eff6ff" : "#f5f3ff", color: sc.trigger_type === "cron" ? "#3b82f6" : "#7c3aed" }}>
-                      {sc.trigger_type === "cron" ? "Schedule" : "Email"}
+                    <span style={{ ...s.typePill, background: "#eff6ff", color: "#3b82f6" }}>
+                      {sc.trigger_type === "cron" ? "Cron" : sc.trigger_type === "folder_watch" ? "Folder" : sc.trigger_type === "file_watch" ? "File" : "Email"}
                     </span>
                   </td>
                   <td style={{ ...s.tdCell, fontFamily: "monospace", fontSize: 12, color: "#475569" }}>
-                    {sc.trigger_type === "email" ? <span style={{ fontStyle: "italic", color: "#94a3b8" }}>coming soon</span> : cronHuman(sc.cron_expression)}
+                    {sc.trigger_type === "cron" ? cronHuman(sc.cron_expression)
+                      : sc.trigger_type === "folder_watch" ? (sc.watch_path || "—")
+                      : sc.trigger_type === "file_watch" ? `${sc.watch_path || "—"} / ${sc.file_pattern || "*"}`
+                      : sc.imap_user || "—"}
                   </td>
                   <td style={s.tdCell}>
                     <button
@@ -269,14 +279,21 @@ export default function Scheduler() {
             <div style={s.field}>
               <label style={s.label}>TRIGGER TYPE</label>
               <div style={s.typeRow}>
-                {["cron", "email"].map(t => (
-                  <button key={t} style={{ ...s.typeBtn, ...(form.trigger_type === t ? s.typeBtnActive : {}) }} onClick={() => setForm(f => ({ ...f, trigger_type: t }))}>
-                    {t === "cron" ? "⏱ Cron" : "✉ Email"}
+                {[
+                  { key: "cron",         label: "⏱ Cron" },
+                  { key: "folder_watch", label: "📁 Folder Watch" },
+                  { key: "file_watch",   label: "📄 File Watch" },
+                  { key: "email",        label: "✉ Email" },
+                ].map(t => (
+                  <button key={t.key} style={{ ...s.typeBtn, ...(form.trigger_type === t.key ? s.typeBtnActive : {}) }}
+                    onClick={() => setForm(f => ({ ...f, trigger_type: t.key }))}>
+                    {t.label}
                   </button>
                 ))}
               </div>
             </div>
-            {form.trigger_type === "cron" ? (
+
+            {form.trigger_type === "cron" && (
               <div style={s.field}>
                 <label style={s.label}>FREQUENCY</label>
                 <select style={s.input} value={customCron ? "" : form.cron_expression} onChange={e => { if (e.target.value === "") { setCustomCron(true); setForm(f => ({ ...f, cron_expression: "" })); } else { setCustomCron(false); setForm(f => ({ ...f, cron_expression: e.target.value })); } }}>
@@ -285,8 +302,65 @@ export default function Scheduler() {
                 {customCron && <input style={{ ...s.input, marginTop: 8, fontFamily: "monospace" }} placeholder="e.g. 0 9 * * 1-5" value={form.cron_expression} onChange={e => setForm(f => ({ ...f, cron_expression: e.target.value }))} />}
                 {form.cron_expression && <div style={s.cronPreview}>⏱ {cronHuman(form.cron_expression)}</div>}
               </div>
-            ) : (
-              <div style={s.emailPlaceholder}>✉ Email trigger coming soon — configuration will appear here.</div>
+            )}
+
+            {(form.trigger_type === "folder_watch" || form.trigger_type === "file_watch") && (
+              <>
+                <div style={s.field}>
+                  <label style={s.label}>WATCH PATH</label>
+                  <input style={s.input} placeholder="/app/uploads/watch" value={form.watch_path}
+                    onChange={e => setForm(f => ({ ...f, watch_path: e.target.value }))} />
+                  <div style={s.hint}>Directory to monitor for new files</div>
+                </div>
+                {form.trigger_type === "file_watch" && (
+                  <div style={s.field}>
+                    <label style={s.label}>FILE PATTERN</label>
+                    <input style={s.input} placeholder="*.csv" value={form.file_pattern}
+                      onChange={e => setForm(f => ({ ...f, file_pattern: e.target.value }))} />
+                    <div style={s.hint}>e.g. *.csv, report_*.txt, * for all files</div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {form.trigger_type === "email" && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 12 }}>
+                  <div style={s.field}>
+                    <label style={s.label}>IMAP HOST</label>
+                    <input style={s.input} placeholder="imap.gmail.com" value={form.imap_host}
+                      onChange={e => setForm(f => ({ ...f, imap_host: e.target.value }))} />
+                  </div>
+                  <div style={s.field}>
+                    <label style={s.label}>PORT</label>
+                    <input style={s.input} type="number" value={form.imap_port}
+                      onChange={e => setForm(f => ({ ...f, imap_port: parseInt(e.target.value) }))} />
+                  </div>
+                </div>
+                <div style={s.field}>
+                  <label style={s.label}>EMAIL ADDRESS</label>
+                  <input style={s.input} placeholder="you@gmail.com" value={form.imap_user}
+                    onChange={e => setForm(f => ({ ...f, imap_user: e.target.value }))} />
+                </div>
+                <div style={s.field}>
+                  <label style={s.label}>PASSWORD / APP PASSWORD</label>
+                  <input style={s.input} type="password" placeholder="App password" value={form.imap_password}
+                    onChange={e => setForm(f => ({ ...f, imap_password: e.target.value }))} />
+                  <div style={s.hint}>For Gmail, use an App Password (not your main password)</div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div style={s.field}>
+                    <label style={s.label}>SUBJECT FILTER (optional)</label>
+                    <input style={s.input} placeholder="New Report" value={form.subject_filter}
+                      onChange={e => setForm(f => ({ ...f, subject_filter: e.target.value }))} />
+                  </div>
+                  <div style={s.field}>
+                    <label style={s.label}>SENDER FILTER (optional)</label>
+                    <input style={s.input} placeholder="boss@company.com" value={form.sender_filter}
+                      onChange={e => setForm(f => ({ ...f, sender_filter: e.target.value }))} />
+                  </div>
+                </div>
+              </>
             )}
             <div style={s.field}>
               <label style={s.label}>TASKS TO RUN</label>
@@ -413,7 +487,7 @@ const s = {
   label: { fontSize: 10, fontWeight: 800, color: "#64748b", letterSpacing: "0.08em" },
   input: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#0f172a", outline: "none", fontFamily: "inherit" },
   cronPreview: { fontSize: 11, color: "#6366f1", fontWeight: 700, marginTop: 4 },
-  emailPlaceholder: { background: "#f8fafc", borderRadius: 10, padding: "16px 20px", fontSize: 13, color: "#94a3b8", fontStyle: "italic" },
+  hint: { fontSize: 11, color: "#94a3b8", marginTop: 4 },
   typeRow: { display: "flex", gap: 8 },
   typeBtn: { flex: 1, padding: "10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" },
   typeBtnActive: { background: "#eff6ff", color: "#3b82f6", border: "1px solid #bfdbfe", fontWeight: 700 },

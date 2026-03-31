@@ -1,15 +1,16 @@
 FROM python:3.11-slim
 
-WORKDIR /app
+# Minimal deps — only what the sandbox needs
+RUN pip install --no-cache-dir httpx
 
-COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+WORKDIR /code
 
-COPY backend/ .
+# No API keys, no secrets, no host mounts
+# Container receives: PROMPT, AGENT_ID, RUN_ID, NODE_ID, FASTAPI_URL via env
+# Container calls: POST $FASTAPI_URL/internal/llm/generate
+# Container calls: POST $FASTAPI_URL/internal/tools/execute
+# Container writes output to stdout, exits
 
-# Sandboxed workspace — agents read/write here only
-RUN mkdir -p /workspace
+COPY docker/agent_runner.py /code/agent_runner.py
 
-# No network access to host, no host mounts except /workspace
-# Entrypoint: run a single task and exit
-ENTRYPOINT ["python", "-m", "execution.workflow_runner"]
+ENTRYPOINT ["python", "/code/agent_runner.py"]

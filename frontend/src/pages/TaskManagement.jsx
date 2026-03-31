@@ -815,8 +815,12 @@ export default function TaskManagement() {
                       Edit
                     </button>
                     <button
-                      style={{ ...s.modeToggleBtn, ...(canvasMode === "dryrun" ? s.modeToggleBtnDry : {}) }}
-                      onClick={() => canvasMode !== "dryrun" && tasks.length > 0 && handleDryRun(tasks.find(t => t.name === form.name)?.id)}
+                      style={{ ...s.modeToggleBtn, ...(canvasMode === "dryrun" ? s.modeToggleBtnDry : {}), ...(!tasks.find(t => t.name === form.name) ? { opacity: 0.4, cursor: "not-allowed" } : {}) }}
+                      onClick={() => {
+                        const savedTask = tasks.find(t => t.name === form.name);
+                        if (canvasMode !== "dryrun" && savedTask) handleDryRun(savedTask.id);
+                      }}
+                      title={!tasks.find(t => t.name === form.name) ? "Save the task first before dry running" : "Dry Run"}
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                       {dryRunning ? "Running..." : "Dry Run"}

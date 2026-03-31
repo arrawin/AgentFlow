@@ -7,11 +7,13 @@ const TOOL_INFO = {
   file_search: { label: "File Search", desc: "Search lines matching a query in a file",   color: "#1a56db", bg: "#dbeafe", group: "File System" },
   file_lines:  { label: "File Lines",  desc: "Read a specific line range from a file",    color: "#1a56db", bg: "#dbeafe", group: "File System" },
   file_writer: { label: "File Writer", desc: "Write output to a downloadable file",       color: "#ea6c00", bg: "#fff0e0", group: "File System" },
+  run_python:  { label: "Run Python",  desc: "Execute Python code in a sandbox container",color: "#7c3aed", bg: "#ede9fe", group: "Code Execution" },
 };
 
 const TOOL_GROUPS = {
   "FILE SYSTEM": { color: "#1a56db", tools: ["file_reader", "file_writer", "file_search", "file_lines"] },
   "NETWORK":     { color: "#059669", tools: ["web_search"] },
+  "CODE":        { color: "#7c3aed", tools: ["run_python"] },
 };
 
 const AVATAR_COLORS = ["#ea6c00", "#1a56db", "#059669", "#7c3aed", "#0891b2", "#dc2626"];
@@ -48,8 +50,17 @@ export default function ToolsManagement() {
       .catch(console.error);
   }, []);
 
-  const toggle = (agentId, toolKey) => {
-    setPermissions(prev => {
+  const toggleSandbox = async (toolKey, currentSandboxed) => {
+    try {
+      await api.patch(`/tools/${toolKey}/sandbox`, { sandboxed: !currentSandboxed });
+      setTools(prev => prev.map(t => t.key === toolKey ? { ...t, sandboxed: !currentSandboxed } : t));
+    } catch (e) {
+      setToast({ msg: "Failed to update sandbox setting", ok: false });
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
+  const toggle = (agentId, toolKey) => {    setPermissions(prev => {
       const next = new Set(prev[agentId] || []);
       next.has(toolKey) ? next.delete(toolKey) : next.add(toolKey);
       return { ...prev, [agentId]: next };
@@ -99,7 +110,21 @@ export default function ToolsManagement() {
                 <div style={s.toolName}>{info.label}</div>
                 <div style={s.toolDesc}>{info.desc}</div>
               </div>
-              <span style={{ ...s.toolGroupBadge, background: info.bg, color: info.color }}>{info.group}</span>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
+                <span style={{ ...s.toolGroupBadge, background: info.bg, color: info.color }}>{info.group}</span>
+                <button
+                  style={{
+                    fontSize: 9, fontWeight: 800, padding: "2px 8px", borderRadius: 20,
+                    border: "none", cursor: "pointer",
+                    background: t.sandboxed ? "#fef3c7" : "#f1f5f9",
+                    color: t.sandboxed ? "#92400e" : "#64748b",
+                  }}
+                  onClick={() => toggleSandbox(t.key, t.sandboxed)}
+                  title={t.sandboxed ? "Running in sandbox container — click to disable" : "Running directly — click to sandbox"}
+                >
+                  {t.sandboxed ? "🔒 SANDBOXED" : "⚡ DIRECT"}
+                </button>
+              </div>
             </div>
           );
         })}
