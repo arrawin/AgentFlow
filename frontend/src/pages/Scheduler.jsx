@@ -61,8 +61,25 @@ export default function Scheduler() {
   const openCreate = () => { setForm(EMPTY_FORM); setEditId(null); setCustomCron(false); setError(""); setShowForm(true); };
 
   const openEdit = (sc) => {
-    setForm({ name: sc.name, trigger_type: sc.trigger_type, cron_expression: sc.cron_expression || "0 9 * * *", task_ids: sc.task_ids || [], enabled: sc.enabled });
-    setEditId(sc.id); setCustomCron(!CRON_PRESETS.find(p => p.value === sc.cron_expression)); setError(""); setShowForm(true);
+    setForm({
+      name: sc.name,
+      trigger_type: sc.trigger_type,
+      cron_expression: sc.cron_expression || "0 9 * * *",
+      task_ids: sc.task_ids || [],
+      enabled: sc.enabled,
+      watch_path: sc.watch_path || "",
+      file_pattern: sc.file_pattern || "*",
+      imap_host: sc.imap_host || "",
+      imap_port: sc.imap_port || 993,
+      imap_user: sc.imap_user || "",
+      imap_password: "",
+      subject_filter: sc.subject_filter || "",
+      sender_filter: sc.sender_filter || "",
+    });
+    setEditId(sc.id);
+    setCustomCron(!CRON_PRESETS.find(p => p.value === sc.cron_expression));
+    setError("");
+    setShowForm(true);
   };
 
   const handleSave = async () => {
@@ -288,13 +305,17 @@ export default function Scheduler() {
               <label style={s.label}>TRIGGER TYPE</label>
               <div style={s.typeRow}>
                 {[
-                  { key: "cron",         label: "⏱ Cron" },
-                  { key: "folder_watch", label: "📁 Folder Watch" },
-                  { key: "file_watch",   label: "📄 File Watch" },
-                  { key: "email",        label: "✉ Email" },
+                  { key: "cron", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>, label: "Cron" },
+                  { key: "folder_watch", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>, label: "Folder Watch" },
+                  { key: "file_watch", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>, label: "File Watch" },
+                  { key: "email", icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>, label: "Email" },
                 ].map(t => (
-                  <button key={t.key} style={{ ...s.typeBtn, ...(form.trigger_type === t.key ? s.typeBtnActive : {}) }}
+                  <button key={t.key}
+                    style={{ ...s.typeBtn, ...(form.trigger_type === t.key ? s.typeBtnActive : {}) }}
                     onClick={() => setForm(f => ({ ...f, trigger_type: t.key }))}>
+                    <span style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 28, height: 28, borderRadius: 8, background: form.trigger_type === t.key ? "#1a56db15" : "#f1f5f9", color: form.trigger_type === t.key ? "#1a56db" : "#64748b", marginBottom: 6 }}>
+                      {t.icon}
+                    </span>
                     {t.label}
                   </button>
                 ))}
@@ -308,7 +329,7 @@ export default function Scheduler() {
                   {CRON_PRESETS.map(p => <option key={p.label} value={p.value}>{p.label}</option>)}
                 </select>
                 {customCron && <input style={{ ...s.input, marginTop: 8, fontFamily: "monospace" }} placeholder="e.g. 0 9 * * 1-5" value={form.cron_expression} onChange={e => setForm(f => ({ ...f, cron_expression: e.target.value }))} />}
-                {form.cron_expression && <div style={s.cronPreview}>⏱ {cronHuman(form.cron_expression)}</div>}
+                {form.cron_expression && <div style={s.cronPreview}>{cronHuman(form.cron_expression)}</div>}
               </div>
             )}
 
@@ -318,7 +339,7 @@ export default function Scheduler() {
                   <label style={s.label}>WATCH PATH</label>
                   <input style={s.input} placeholder="/app/uploads/watch" value={form.watch_path}
                     onChange={e => setForm(f => ({ ...f, watch_path: e.target.value }))} />
-                  <div style={s.hint}>Directory to monitor for new files</div>
+                  <div style={s.hint}>Directory to monitor for new files. Use a dedicated input folder (e.g. /app/uploads/inbox) to avoid triggering on agent output files.</div>
                 </div>
                 {form.trigger_type === "file_watch" && (
                   <div style={s.field}>
@@ -496,9 +517,9 @@ const s = {
   input: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#0f172a", outline: "none", fontFamily: "inherit" },
   cronPreview: { fontSize: 11, color: "#6366f1", fontWeight: 700, marginTop: 4 },
   hint: { fontSize: 11, color: "#94a3b8", marginTop: 4 },
-  typeRow: { display: "flex", gap: 8 },
-  typeBtn: { flex: 1, padding: "10px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "#64748b" },
-  typeBtnActive: { background: "#eff6ff", color: "#3b82f6", border: "1px solid #bfdbfe", fontWeight: 700 },
+  typeRow: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 },
+  typeBtn: { padding: "12px 8px", borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 11, fontWeight: 700, cursor: "pointer", color: "#64748b", display: "flex", flexDirection: "column", alignItems: "center", gap: 0, transition: "all 150ms", letterSpacing: "0.02em" },
+  typeBtnActive: { background: "#eff6ff", color: "#1a56db", border: "1px solid #bfdbfe", fontWeight: 800 },
   taskList: { display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" },
   taskItem: { display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 8, cursor: "pointer", border: "1px solid #e2e8f0", background: "#f8fafc" },
   taskItemActive: { background: "#eff6ff", border: "1px solid #bfdbfe" },

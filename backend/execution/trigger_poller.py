@@ -89,6 +89,9 @@ def _check_file_trigger(schedule, db):
 
     current_files = set()
     for f in os.listdir(watch_path):
+        # Skip agent-generated output files (prefixed with _run_ or _agent_)
+        if f.startswith("_run_") or f.startswith("_agent_"):
+            continue
         if fnmatch.fnmatch(f, pattern):
             current_files.add(f)
 
@@ -97,7 +100,6 @@ def _check_file_trigger(schedule, db):
 
     if new_files:
         print(f"[trigger_poller] New files detected in {watch_path}: {new_files}")
-        # Update last_seen before firing to avoid double-trigger
         schedule.last_seen_files = list(current_files)
         db.commit()
         _fire_tasks(schedule, db, trigger_context=f"new files: {', '.join(new_files)}")

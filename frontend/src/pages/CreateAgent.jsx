@@ -9,14 +9,12 @@ export default function CreateAgent() {
 
   const [domains, setDomains] = useState([]);
   const [llmConfigs, setLlmConfigs] = useState([]);
-  const [skillMode, setSkillMode] = useState("type"); // type | upload
+  const [availableTools, setAvailableTools] = useState([]);
+  const [selectedTools, setSelectedTools] = useState([]);
+  const [skillMode, setSkillMode] = useState("type");
   const [skillFile, setSkillFile] = useState(null);
-  const [form, setForm] = useState({
-    name: "",
-    domain_id: "",
-    skills: "",
-    llm_config_id: "",
-  });
+  const [domainSearch, setDomainSearch] = useState("");
+  const [form, setForm] = useState({ name: "", domain_id: "", skills: "", llm_config_id: "" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
@@ -27,18 +25,22 @@ export default function CreateAgent() {
   const [dryRunning, setDryRunning] = useState(false);
 
   const handleDryRun = async () => {
-    if (!dryRunPrompt.trim() || !id) return;
+    if (!dryRunPrompt.trim()) return;
     setDryRunning(true);
     setDryRunResult(null);
     try {
-      const res = await api.post(`/agents/${id}/dry-run`, { sample_prompt: dryRunPrompt });
-      setDryRunResult(res.data);
+      if (id) {
+        const res = await api.post(`/agents/${id}/dry-run`, { sample_prompt: dryRunPrompt });
+        setDryRunResult(res.data);
+      } else {
+        setDryRunResult({ output: "Save the agent first to run a live test.", tool_calls: [] });
+      }
     } catch (e) {
       setDryRunResult({ output: e.response?.data?.detail || "Dry run failed", tool_calls: [] });
     } finally {
       setDryRunning(false);
     }
-  }; // true once user explicitly selects
+  };
 
   const suggestDomain = async (skillContent) => {
     if (!skillContent || skillContent.length < 20 || userPickedDomain) return;
@@ -46,7 +48,7 @@ export default function CreateAgent() {
     try {
       const res = await api.post("/agents/suggest-domain", { skill_content: skillContent });
       setDomainSuggestion(res.data);
-    } catch { /* silent */ }
+    } catch { }
     finally { setSuggesting(false); }
   };
 
@@ -55,32 +57,24 @@ export default function CreateAgent() {
     if (!domainSuggestion.is_new) {
       setForm(f => ({ ...f, domain_id: String(domainSuggestion.domain_id) }));
     } else {
-      // Create the new domain then assign it
       try {
         const res = await api.post("/domains", { name: domainSuggestion.domain });
         setDomains(prev => [...prev, res.data]);
         setForm(f => ({ ...f, domain_id: String(res.data.id) }));
-      } catch { /* silent */ }
+      } catch { }
     }
     setDomainSuggestion(null);
   };
 
   useEffect(() => {
-    api.get("/domains").then(r => {
-      setDomains(r.data);
-      // Don't auto-select — let user pick or let suggestion handle it
-    }).catch(console.error);
+    api.get("/domains").then(r => setDomains(r.data)).catch(console.error);
     api.get("/llm-configs").then(r => setLlmConfigs(r.data)).catch(console.error);
-
+    api.get("/tools").then(r => setAvailableTools(r.data)).catch(console.error);
     if (isEdit) {
       api.get(`/agents/${id}`).then(r => {
         const a = r.data;
-        setForm({
-          name: a.name || "",
-          domain_id: String(a.domain_id || ""),
-          skills: a.skills || "",
-          llm_config_id: a.llm_config_id || "",
-        });
+        setForm({ name: a.name || "", domain_id: String(a.domain_id || ""), skills: a.skills || "", llm_config_id: a.llm_config_id || "" });
+        setSelectedTools(a.allowed_tools || []);
       }).catch(console.error);
     }
   }, [id, isEdit]);
@@ -88,28 +82,13 @@ export default function CreateAgent() {
   const handleSave = async () => {
     if (!form.name) { setError("Agent name is required"); return; }
     if (!form.domain_id) { setError("Domain is required"); return; }
-    setSaving(true);
-    setError("");
+    setSaving(true); setError("");
     try {
       let skillsText = form.skills;
-
-      // If file uploaded, read its content
-      if (skillMode === "upload" && skillFile) {
-        skillsText = await skillFile.text();
-      }
-
-      const payload = {
-        name: form.name,
-        domain_id: parseInt(form.domain_id),
-        skills: skillsText || null,
-        llm_config_id: form.llm_config_id ? parseInt(form.llm_config_id) : null,
-      };
-
-      if (isEdit) {
-        await api.put(`/agents/${id}`, payload);
-      } else {
-        await api.post("/agents", payload);
-      }
+      if (skillMode === "upload" && skillFile) skillsText = await skillFile.text();
+      const payload = { name: form.name, domain_id: parseInt(form.domain_id), skills: skillsText || null, llm_config_id: form.llm_config_id ? parseInt(form.llm_config_id) : null, allowed_tools: selectedTools };
+      if (isEdit) await api.put(`/agents/${id}`, payload);
+      else await api.post("/agents", payload);
       navigate("/agents");
     } catch (e) {
       setError(e.response?.data?.detail || "Error saving agent");
@@ -117,238 +96,182 @@ export default function CreateAgent() {
     }
   };
 
-  const DOMAIN_ICONS = null; // replaced with colored dot in domain items
+  const filteredDomains = domains.filter(d => d.name !== "SYSTEM" && d.name.toLowerCase().includes(domainSearch.toLowerCase()));
+  const selectedDomain = domains.find(d => String(d.id) === form.domain_id);
 
   return (
     <div className="animate-up" style={s.page}>
-      {/* Header */}
-      <div style={s.pageHeader}>
-        <div>
-          <h1 style={s.pageTitle}>{isEdit ? "Edit Agent" : "Create New Agent"}</h1>
-          <p style={s.pageSub}>Define persona, skills, and configuration for your AI agent.</p>
-        </div>
-        <div style={s.headerActions}>
-          <button style={s.cancelBtn} onClick={() => navigate("/agents")}>Cancel</button>
-          <button className="btn-primary" style={s.createBtn} onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : isEdit ? "Save Changes" : "Create Agent"}
-          </button>
-        </div>
-      </div>
-
       {error && <div style={s.errorBar}>{error}</div>}
 
-      <div style={s.layout}>
-        {/* Left Col: Domains */}
-        <div style={s.leftCol}>
-          <div style={s.sectionLabel}>AGENT DOMAIN</div>
-          <div style={s.domainList}>
-            {domains.filter(d => d.name !== "SYSTEM").map((d, i) => (
-              <div
-                key={d.id}
-                style={{ ...s.domainItem, ...(form.domain_id === String(d.id) ? s.domainItemActive : {}) }}
-                onClick={() => { setForm(f => ({ ...f, domain_id: String(d.id) })); setUserPickedDomain(true); setDomainSuggestion(null); }}
-              >
-                <span style={{ ...s.domainIcon, background: "#6366f120", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2"><circle cx="12" cy="7" r="4"/><path d="M4 21v-2a4 4 0 014-4h8a4 4 0 014 4v2"/></svg>
-                </span>
-                <span style={s.domainName}>{d.name}</span>
-              </div>
-            ))}
-            {domains.length === 0 && (
-              <div style={{ fontSize: 12, color: "var(--on-surface-variant)", padding: "8px 0" }}>
-                No domains yet. Create one in Agent Management.
-              </div>
-            )}
+      {/* Basic Identity */}
+      <section style={s.section}>
+        <div style={s.sectionTitle}>Basic Identity</div>
+        <div style={s.identityGrid}>
+          <div style={s.field}>
+            <label style={s.label}>AGENT NAME</label>
+            <input style={s.input} placeholder="e.g. Sentinel-Alpha-8" value={form.name}
+              onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+          </div>
+          <div style={s.field}>
+            <label style={s.label}>OPERATIONAL DOMAIN</label>
+            <div style={s.domainSearch}>
+              <input style={{ ...s.input, paddingRight: 32 }} placeholder="Search domains (e.g. Cybersecurity, Finance...)"
+                value={domainSearch} onChange={e => setDomainSearch(e.target.value)} />
+              <svg style={s.searchIcon} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </div>
+            <div style={s.domainTags}>
+              {filteredDomains.slice(0, 8).map(d => (
+                <button key={d.id}
+                  style={{ ...s.domainTag, ...(form.domain_id === String(d.id) ? s.domainTagActive : {}) }}
+                  onClick={() => { setForm(f => ({ ...f, domain_id: String(d.id) })); setUserPickedDomain(true); setDomainSuggestion(null); }}>
+                  {d.name}
+                </button>
+              ))}
+              {filteredDomains.length === 0 && domainSearch && (
+                <span style={{ fontSize: 11, color: "#94a3b8" }}>No domains found</span>
+              )}
+            </div>
+            {selectedDomain && <div style={s.selectedDomain}>Selected: <strong>{selectedDomain.name}</strong></div>}
           </div>
         </div>
+        <div style={{ ...s.field, marginTop: 16 }}>
+          <label style={s.label}>LLM CONFIG</label>
+          <select style={{ ...s.input, maxWidth: 320 }} value={form.llm_config_id}
+            onChange={e => setForm(f => ({ ...f, llm_config_id: e.target.value }))}>
+            <option value="">Default (Groq)</option>
+            {llmConfigs.map(c => <option key={c.id} value={c.id}>{c.provider} / {c.model}</option>)}
+          </select>
+        </div>
+      </section>
 
-        {/* Right Col: Form */}
-        <div style={s.rightCol}>
-          {/* Core Identity */}
-          <div style={s.formSection}>
-            <div style={s.formSectionHeader}>CORE IDENTITY</div>
-            <div style={s.formGrid}>
-              <div style={s.inputGroup}>
-                <label style={s.inputLabel}>Agent Name</label>
-                <input
-                  style={s.input}
-                  placeholder="e.g. Research Agent"
-                  value={form.name}
-                  onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                />
-              </div>
-              <div style={s.inputGroup}>
-                <label style={s.inputLabel}>Domain</label>
-                <select
-                  style={s.input}
-                  value={form.domain_id}
-                  onChange={e => { setForm(f => ({ ...f, domain_id: e.target.value })); setUserPickedDomain(true); setDomainSuggestion(null); }}
-                >
-                  <option value="">Select domain</option>
-                  {domains.filter(d => d.name !== "SYSTEM").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-              </div>
-            </div>
-            <div style={{ ...s.inputGroup, marginTop: 20 }}>
-              <label style={s.inputLabel}>LLM Config</label>
-              <select
-                style={s.input}
-                value={form.llm_config_id}
-                onChange={e => setForm(f => ({ ...f, llm_config_id: e.target.value }))}
-              >
-                <option value="">Default (Groq)</option>
-                {llmConfigs.map(c => <option key={c.id} value={c.id}>{c.provider} / {c.model}</option>)}
-              </select>
+      {/* Core Capabilities */}
+      <section style={s.section}>
+        <div style={s.sectionTitle}>Core Capabilities</div>
+        <div style={s.skillTabs}>
+          <button style={{ ...s.skillTab, ...(skillMode === "type" ? s.skillTabActive : {}) }} onClick={() => setSkillMode("type")}>Instruction Set</button>
+          <button style={{ ...s.skillTab, ...(skillMode === "upload" ? s.skillTabActive : {}) }} onClick={() => setSkillMode("upload")}>Upload Knowledge Files</button>
+        </div>
+
+        {skillMode === "type" ? (
+          <div style={s.textareaWrap}>
+            <textarea style={s.textarea}
+              placeholder="Describe the primary mission, personality, and operational constraints of this agent..."
+              value={form.skills}
+              onChange={e => { setForm(f => ({ ...f, skills: e.target.value })); setDomainSuggestion(null); }}
+              onBlur={e => suggestDomain(e.target.value)}
+            />
+            <div style={s.textareaFooter}>
+              {suggesting && <span style={{ fontSize: 11, color: "#94a3b8" }}>Suggesting domain...</span>}
+              {domainSuggestion && !userPickedDomain && (
+                <div style={s.suggestion}>
+                  <span style={{ fontSize: 12, color: "#1d4ed8", flex: 1 }}>Suggested: <strong>{domainSuggestion.domain}</strong>{domainSuggestion.is_new ? " (new)" : ""}</span>
+                  <button style={s.applyBtn} onClick={applySuggestion}>Apply</button>
+                  <button style={s.dismissBtn} onClick={() => setDomainSuggestion(null)}>✕</button>
+                </div>
+              )}
+              <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: "auto" }}>{form.skills.length} chars</span>
             </div>
           </div>
-
-          {/* Cognitive Skills */}
-          <div style={s.formSection}>
-            <div style={s.formSectionHeader}>COGNITIVE SKILLS</div>
-            <div style={s.skillsTabs}>
-              <button
-                style={skillMode === "type" ? s.skillTabActive : s.skillTab}
-                onClick={() => setSkillMode("type")}
-              >
-                Type Skill
-              </button>
-              <button
-                style={skillMode === "upload" ? s.skillTabActive : s.skillTab}
-                onClick={() => setSkillMode("upload")}
-              >
-                Upload .md
-              </button>
-            </div>
-
-            {skillMode === "type" ? (
-              <>
-                <textarea
-                  style={s.textarea}
-                  placeholder="Define the agent's behavior, constraints, and operational goals here..."
-                  value={form.skills}
-                  onChange={e => {
-                    setForm(f => ({ ...f, skills: e.target.value }));
-                    setDomainSuggestion(null);
-                  }}
-                  onBlur={e => suggestDomain(e.target.value)}
-                />
-                {suggesting && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>✦ Suggesting domain...</div>}
-                {domainSuggestion && !userPickedDomain && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, padding: "8px 12px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
-                    <span style={{ fontSize: 12, color: "#1d4ed8", flex: 1 }}>
-                      ✦ Suggested domain: <strong>{domainSuggestion.domain}</strong>
-                      {domainSuggestion.is_new ? " (new)" : " (existing)"}
-                    </span>
-                    <button style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }} onClick={applySuggestion}>
-                      Apply
-                    </button>
-                    <button style={{ background: "transparent", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 13 }} onClick={() => setDomainSuggestion(null)}>✕</button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div style={s.uploadArea}>
-                <input
-                  type="file"
-                  accept=".md,.txt"
-                  id="skill-file"
-                  style={{ display: "none" }}
-                  onChange={e => {
-                    const file = e.target.files[0];
-                    if (file) {
-                      setSkillFile(file);
-                      // Preview content
-                      file.text().then(text => setForm(f => ({ ...f, skills: text })));
-                    }
-                  }}
-                />
-                <label htmlFor="skill-file" style={s.uploadLabel}>
-                  {skillFile ? (
-                    <>
-                      <span style={{ fontSize: 20 }}>📄</span>
-                      <span style={s.uploadFileName}>{skillFile.name}</span>
-                      <span style={s.uploadHint}>Click to change file</span>
-                    </>
-                  ) : (
-                    <>
-                      <span style={{ fontSize: 24 }}>📁</span>
-                      <span style={s.uploadFileName}>Click to upload .md file</span>
-                      <span style={s.uploadHint}>Markdown or plain text</span>
-                    </>
-                  )}
-                </label>
-                {skillFile && (
-                  <button
-                    style={s.clearFileBtn}
-                    onClick={() => {
-                      setSkillFile(null);
-                      setForm(f => ({ ...f, skills: "" }));
-                      document.getElementById("skill-file").value = "";
-                    }}
-                  >
-                    ✕ Remove {skillFile.name}
-                  </button>
-                )}
-                {form.skills && (
-                  <div style={s.filePreview}>
-                    <div style={s.filePreviewLabel}>Preview:</div>
-                    <pre style={s.filePreviewText}>{form.skills.slice(0, 300)}{form.skills.length > 300 ? "..." : ""}</pre>
-                  </div>
-                )}
+        ) : (
+          <div style={s.uploadArea}>
+            <input type="file" accept=".md,.txt" id="skill-file" style={{ display: "none" }}
+              onChange={e => { const f = e.target.files[0]; if (f) { setSkillFile(f); f.text().then(t => setForm(ff => ({ ...ff, skills: t }))); } }} />
+            <label htmlFor="skill-file" style={s.uploadLabel}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span style={{ fontSize: 13, fontWeight: 600, color: skillFile ? "var(--on-surface)" : "#94a3b8" }}>{skillFile ? skillFile.name : "Click to upload .md or .txt file"}</span>
+              <span style={{ fontSize: 11, color: "#94a3b8" }}>Markdown or plain text</span>
+            </label>
+            {skillFile && form.skills && (
+              <div style={s.filePreview}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", marginBottom: 6 }}>PREVIEW</div>
+                <pre style={{ fontSize: 11, color: "var(--on-surface-variant)", fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{form.skills.slice(0, 400)}{form.skills.length > 400 ? "..." : ""}</pre>
               </div>
             )}
-            <div style={s.hintText}>✦ Skills define how the agent behaves and what it focuses on.</div>
           </div>
+        )}
+      </section>
 
-          {/* Dry Run Panel — only shown when editing an existing agent */}
-          {isEdit && (
-            <div style={s.formSection}>
-              <div style={s.formSectionHeader}>DRY RUN</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ display: "flex", gap: 10 }}>
-                  <input
-                    style={{ ...s.input, flex: 1 }}
-                    placeholder="Enter a sample prompt to test this agent..."
-                    value={dryRunPrompt}
-                    onChange={e => setDryRunPrompt(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && handleDryRun()}
-                  />
-                  <button
-                    style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 10, padding: "10px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer", opacity: dryRunning ? 0.6 : 1 }}
-                    onClick={handleDryRun}
-                    disabled={dryRunning}
-                  >
-                    {dryRunning ? "Running..." : "Execute"}
-                  </button>
-                </div>
-                {dryRunResult && (
-                  <div style={{ background: "#0f172a", borderRadius: 10, padding: 16 }}>
-                    <div style={{ fontSize: 9, fontWeight: 800, color: "#64748b", letterSpacing: "0.06em", marginBottom: 8 }}>OUTPUT — real LLM response</div>
-                    {dryRunResult.tool_calls?.length > 0 && (
-                      <div style={{ marginBottom: 10 }}>
-                        {dryRunResult.tool_calls.map((tc, i) => (
-                          <div key={i} style={{ display: "flex", gap: 8, marginBottom: 4 }}>
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#818cf8", background: "#1e1b4b", padding: "2px 8px", borderRadius: 4 }}>{tc.tool}</span>
-                            <span style={{ fontSize: 11, color: "#94a3b8" }}>{tc.result}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <pre style={{ fontSize: 12, color: "#e2e8f0", lineHeight: 1.6, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{dryRunResult.output}</pre>
+      {/* Tool Selection */}
+      <section style={s.section}>
+        <div style={s.sectionTitle}>Permissions & Tools</div>
+        <p style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>Select which tools this agent can use during task execution. Unsafe tools run in an isolated sandbox container.</p>
+        <div style={s.toolGrid}>
+          {availableTools.map(t => {
+            const on = selectedTools.includes(t.key);
+            const isUnsafe = t.sandboxed;
+            return (
+              <div key={t.key}
+                style={{ ...s.toolCard, ...(on ? s.toolCardActive : {}) }}
+                onClick={() => setSelectedTools(prev => on ? prev.filter(k => k !== t.key) : [...prev, t.key])}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                  <div style={{ ...s.toolCheck, background: on ? "#1a56db" : "transparent", border: on ? "none" : "2px solid #cbd5e1" }}>
+                    {on && <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3.5"><polyline points="20 6 9 17 4 12"/></svg>}
                   </div>
-                )}
+                  {isUnsafe && <span style={s.sandboxBadge}>🔒 Sandbox</span>}
+                </div>
+                <div style={s.toolName}>{t.name || t.key}</div>
+                <div style={s.toolDesc}>{t.desc || ""}</div>
               </div>
-            </div>
-          )}
+            );
+          })}
+        </div>
+        {selectedTools.length > 0 && (
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 12 }}>
+            {selectedTools.length} tool{selectedTools.length !== 1 ? "s" : ""} selected: {selectedTools.join(", ")}
+          </div>
+        )}
+      </section>
 
-          {/* Footer */}
-          <div style={s.footer}>
-            <button style={s.discardBtn} onClick={() => navigate("/agents")}>Discard</button>
-            <button className="btn-primary" style={s.deployBtn} onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : isEdit ? "Save Changes" : "Deploy Agent"}
+      {/* Interactive Dry Run */}
+      <section style={s.section}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={s.sectionTitle}>Interactive Logic Dry Run</div>
+          <span style={s.preBadge}>PRE-DEPLOYMENT TEST</span>
+        </div>
+        <div style={s.field}>
+          <label style={s.label}>TEST PROMPT</label>
+          <div style={{ display: "flex", gap: 10 }}>
+            <input style={{ ...s.input, flex: 1 }}
+              placeholder="Enter a sample prompt to test this agent..."
+              value={dryRunPrompt}
+              onChange={e => setDryRunPrompt(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleDryRun()}
+            />
+            <button style={s.runBtn} onClick={handleDryRun} disabled={dryRunning || !dryRunPrompt.trim()}>
+              {dryRunning ? "Running..." : "Run Test"}
             </button>
           </div>
         </div>
+        {dryRunResult && (
+          <div style={s.dryRunOutput}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.06em", marginBottom: 10 }}>OUTPUT</div>
+            {dryRunResult.tool_calls?.length > 0 && (
+              <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 4 }}>
+                {dryRunResult.tool_calls.map((tc, i) => (
+                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: "#6366f1", background: "#ede9fe", padding: "2px 8px", borderRadius: 4, flexShrink: 0 }}>{tc.tool}</span>
+                    <span style={{ fontSize: 11, color: "#64748b" }}>{tc.result}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <pre style={{ fontSize: 12, color: "#334155", lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{dryRunResult.output}</pre>
+          </div>
+        )}
+        {!dryRunResult && (
+          <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 12, fontStyle: "italic" }}>
+            {isEdit ? "Enter a prompt above to test how this agent responds." : "Save the agent first to run a live test."}
+          </div>
+        )}
+      </section>
+
+      {/* Footer */}
+      <div style={s.footer}>
+        <button style={s.discardBtn} onClick={() => navigate("/agents")}>Discard Draft</button>
+        <button className="btn-primary" style={s.deployBtn} onClick={handleSave} disabled={saving}>
+          {saving ? "Saving..." : isEdit ? "Save Changes" : "Finalize & Deploy Agent"}
+        </button>
       </div>
     </div>
   );
@@ -356,41 +279,44 @@ export default function CreateAgent() {
 
 const s = {
   page: { paddingBottom: 60 },
-  pageHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 },
-  pageTitle: { fontSize: 26, fontWeight: 800, color: "var(--on-surface)" },
-  pageSub: { fontSize: 13, color: "var(--on-surface-variant)", marginTop: 4 },
-  headerActions: { display: "flex", gap: 12 },
-  cancelBtn: { background: "var(--surface-container)", color: "var(--on-surface)", padding: "10px 20px", borderRadius: 8, fontSize: 12, fontWeight: 700, border: "none" },
-  createBtn: { padding: "10px 24px", fontSize: 12 },
   errorBar: { background: "var(--error-container)", color: "var(--error)", padding: "12px 16px", borderRadius: 10, fontSize: 13, marginBottom: 24 },
-  layout: { display: "grid", gridTemplateColumns: "220px 1fr", gap: 40 },
-  leftCol: {},
-  sectionLabel: { fontSize: 10, fontWeight: 800, color: "var(--on-surface-variant)", letterSpacing: "0.1em", marginBottom: 16 },
-  domainList: { display: "flex", flexDirection: "column", gap: 6 },
-  domainItem: { display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 10, cursor: "pointer", transition: "all 150ms", color: "var(--on-surface-variant)" },
-  domainItemActive: { background: "var(--surface-bright)", boxShadow: "var(--shadow-sm)", color: "var(--on-surface)", fontWeight: 700 },
-  domainIcon: { width: 24, display: "inline-block", textAlign: "center" },
-  domainName: { fontSize: 13 },
-  rightCol: { display: "flex", flexDirection: "column", gap: 32 },
-  formSection: {},
-  formSectionHeader: { fontSize: 11, fontWeight: 800, color: "var(--on-surface)", letterSpacing: "0.08em", marginBottom: 20 },
-  formGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 },
-  inputGroup: { display: "flex", flexDirection: "column", gap: 8 },
-  inputLabel: { fontSize: 11, fontWeight: 700, color: "var(--on-surface-variant)" },
-  input: { background: "var(--surface-bright)", border: "1px solid var(--outline)", borderRadius: 10, padding: "12px 14px", fontSize: 13 },
-  skillsTabs: { display: "flex", gap: 2, marginBottom: 12, background: "var(--surface-container-low)", padding: 3, borderRadius: 8, width: "fit-content" },
-  skillTab: { background: "transparent", border: "none", padding: "6px 14px", fontSize: 11, fontWeight: 600, color: "var(--on-surface-variant)", cursor: "pointer" },
-  skillTabActive: { background: "var(--surface-bright)", borderRadius: 6, padding: "6px 14px", fontSize: 11, fontWeight: 800, color: "var(--secondary)", boxShadow: "var(--shadow-sm)", border: "none", cursor: "pointer" },
-  textarea: { width: "100%", padding: 16, borderRadius: 12, border: "1px solid var(--outline)", background: "var(--surface-bright)", fontSize: 13, lineHeight: 1.6, minHeight: 160, outline: "none", resize: "vertical" },
+  section: { background: "#fff", borderRadius: 14, padding: 28, boxShadow: "0 1px 8px rgba(15,23,42,0.06)", border: "1px solid #f1f5f9", marginBottom: 20 },
+  sectionTitle: { fontSize: 16, fontWeight: 800, color: "#0f172a", marginBottom: 20, borderLeft: "3px solid #1a56db", paddingLeft: 12 },
+  identityGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 },
+  field: { display: "flex", flexDirection: "column", gap: 8 },
+  label: { fontSize: 10, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.08em" },
+  input: { background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "11px 14px", fontSize: 13, color: "#0f172a", outline: "none", fontFamily: "inherit" },
+  domainSearch: { position: "relative" },
+  searchIcon: { position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)" },
+  domainTags: { display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 },
+  domainTag: { fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 20, border: "1px solid #e2e8f0", background: "#f8fafc", color: "#64748b", cursor: "pointer", transition: "all 150ms" },
+  domainTagActive: { background: "#dbeafe", color: "#1a56db", border: "1px solid #93c5fd", fontWeight: 800 },
+  selectedDomain: { fontSize: 11, color: "#64748b", marginTop: 4 },
+  skillTabs: { display: "flex", borderBottom: "1px solid #e2e8f0", marginBottom: 16 },
+  skillTab: { padding: "8px 16px", fontSize: 12, fontWeight: 600, border: "none", background: "transparent", color: "#94a3b8", cursor: "pointer", borderBottom: "2px solid transparent", marginBottom: -1 },
+  skillTabActive: { color: "#1a56db", fontWeight: 800, borderBottom: "2px solid #1a56db", background: "transparent", border: "none", borderBottom: "2px solid #1a56db", padding: "8px 16px", fontSize: 12, cursor: "pointer", marginBottom: -1 },
+  textareaWrap: { position: "relative" },
+  textarea: { width: "100%", padding: 16, borderRadius: 10, border: "1px solid #e2e8f0", background: "#f8fafc", fontSize: 13, lineHeight: 1.7, minHeight: 180, outline: "none", resize: "vertical", fontFamily: "inherit", color: "#0f172a" },
+  textareaFooter: { display: "flex", alignItems: "center", gap: 10, marginTop: 8 },
+  suggestion: { display: "flex", alignItems: "center", gap: 8, padding: "6px 12px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", flex: 1 },
+  applyBtn: { background: "#1a56db", color: "#fff", border: "none", borderRadius: 6, padding: "3px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" },
+  dismissBtn: { background: "transparent", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 13 },
   uploadArea: { display: "flex", flexDirection: "column", gap: 12 },
-  clearFileBtn: { background: "var(--error-container)", color: "var(--error)", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", alignSelf: "flex-start" },  uploadLabel: { display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 32, border: "2px dashed var(--outline)", borderRadius: 12, cursor: "pointer", background: "var(--surface-container-low)", transition: "border-color 150ms" },
-  uploadFileName: { fontSize: 13, fontWeight: 600, color: "var(--on-surface)" },
-  uploadHint: { fontSize: 11, color: "var(--on-surface-variant)" },
-  filePreview: { background: "var(--surface-container-low)", borderRadius: 8, padding: 12 },
-  filePreviewLabel: { fontSize: 10, fontWeight: 700, color: "var(--on-surface-variant)", marginBottom: 6 },
-  filePreviewText: { fontSize: 11, color: "var(--on-surface-variant)", fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" },
-  hintText: { fontSize: 11, color: "var(--on-surface-variant)", marginTop: 10, opacity: 0.7 },
-  footer: { display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--outline)", paddingTop: 24 },
-  discardBtn: { background: "transparent", border: "none", fontSize: 13, fontWeight: 800, color: "var(--error)", cursor: "pointer" },
-  deployBtn: { padding: "12px 32px", borderRadius: 10, fontSize: 13, fontWeight: 800 },
+  uploadLabel: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: 32, border: "2px dashed #e2e8f0", borderRadius: 12, cursor: "pointer", background: "#f8fafc" },
+  filePreview: { background: "#f1f5f9", borderRadius: 8, padding: 12 },
+  infoRow: { display: "none" },
+  infoCard: {}, infoCardIcon: {}, infoCardTitle: {}, infoCardText: {},
+  preBadge: { fontSize: 10, fontWeight: 800, background: "#d1fae5", color: "#059669", padding: "3px 10px", borderRadius: 20, letterSpacing: "0.06em" },
+  toolGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 12 },
+  toolCard: { background: "#f8fafc", borderRadius: 12, padding: 16, border: "2px solid #e2e8f0", cursor: "pointer", transition: "all 150ms" },
+  toolCardActive: { background: "#eff6ff", border: "2px solid #93c5fd" },
+  toolCheck: { width: 18, height: 18, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  sandboxBadge: { fontSize: 9, fontWeight: 800, background: "#fef3c7", color: "#92400e", padding: "2px 6px", borderRadius: 10 },
+  toolName: { fontSize: 12, fontWeight: 700, color: "#0f172a", marginBottom: 4 },
+  toolDesc: { fontSize: 11, color: "#64748b", lineHeight: 1.4 },
+  runBtn: { background: "#1a56db", color: "#fff", border: "none", borderRadius: 10, padding: "11px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" },
+  dryRunOutput: { marginTop: 16, background: "#f8fafc", borderRadius: 10, padding: 16, border: "1px solid #e2e8f0" },
+  footer: { display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: 8 },
+  discardBtn: { background: "transparent", border: "none", fontSize: 13, fontWeight: 700, color: "#64748b", cursor: "pointer" },
+  deployBtn: { padding: "12px 28px", borderRadius: 10, fontSize: 13, fontWeight: 800 },
 };

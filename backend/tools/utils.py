@@ -6,8 +6,10 @@ UPLOAD_DIR = os.path.abspath(os.getenv("UPLOAD_DIR", "/app/uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def safe_path(filename: str) -> str:
-    # Strip any path traversal attempts
-    filename = os.path.basename(filename)
+    # Normalize the path — allow subdirectory paths like inbox/report.csv
+    # but block absolute paths and traversal
+    if os.path.isabs(filename):
+        raise Exception(f"Access denied: absolute paths not allowed")
     path = os.path.abspath(os.path.join(UPLOAD_DIR, filename))
 
     # Strictly enforce uploads directory

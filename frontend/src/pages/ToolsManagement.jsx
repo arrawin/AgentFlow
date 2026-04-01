@@ -299,18 +299,24 @@ function ToolIcon({ toolKey }) {
 
 function FileUploadSection() {
   const [files, setFiles] = useState([]);
+  const [folders, setFolders] = useState({});
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [activeTab, setActiveTab] = useState("files"); // "files" | "inbox"
 
-  const fetchFiles = () => api.get("/files").then(r => setFiles(r.data.files || [])).catch(() => {});
+  const fetchFiles = () => api.get("/files").then(r => {
+    setFiles(r.data.files || []);
+    setFolders(r.data.folders || {});
+  }).catch(() => {});
   useEffect(() => { fetchFiles(); }, []);
 
-  const handleUpload = async (e) => {
+  const handleUpload = async (e, subfolder = "") => {
     const file = e.target.files[0];
     if (!file) return;
     setUploading(true);
     const fd = new FormData();
     fd.append("file", file);
+    if (subfolder) fd.append("subfolder", subfolder);
     try {
       await api.post("/files/upload", fd, { headers: { "Content-Type": "multipart/form-data" } });
       setMsg({ text: file.name + " uploaded", ok: true });
@@ -324,9 +330,10 @@ function FileUploadSection() {
     }
   };
 
-  const handleDelete = async (filename) => {
+  const handleDelete = async (filename, subfolder = "") => {
+    const path = subfolder ? `${subfolder}/${filename}` : filename;
     try {
-      await api.delete(`/files/${filename}`);
+      await api.delete(`/files/${encodeURIComponent(path)}`);
       fetchFiles();
     } catch {
       setMsg({ text: "Delete failed", ok: false });
@@ -334,34 +341,74 @@ function FileUploadSection() {
     }
   };
 
+  const FileRow = ({ f, subfolder }) => (
+    <div style={s.fileRow}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <span style={{ fontSize: 12, flex: 1 }}>{f}</span>
+      <a href={`/api/files/download/${encodeURIComponent(subfolder ? subfolder+'/'+f : f)}`} download={f} style={{ color: "#1a56db", fontSize: 13, fontWeight: 700, textDecoration: "none" }}>↓</a>
+      <DeleteButton onDelete={() => handleDelete(f, subfolder)} />
+    </div>
+  );
+
+  const inboxFiles = folders["inbox"] || [];
+
   return (
     <div style={s.uploadCard}>
-      <div style={s.uploadTop}>
-        <p style={{ fontSize: 12, color: "var(--on-surface-variant)" }}>
-          Files here are accessible to agents via file tools during execution.
-        </p>
-        <label style={s.uploadBtn}>
-          {uploading ? "Uploading..." : "+ Upload File"}
-          <input type="file" style={{ display: "none" }} onChange={handleUpload} disabled={uploading} />
-        </label>
-      </div>
-      {msg && (
-        <div style={{ fontSize: 12, marginTop: 8, color: msg.ok ? "#15803d" : "#dc2626" }}>
-          {msg.text}
-        </div>
-      )}
-      <div style={s.fileList}>
-        {files.length === 0 ? (
-          <div style={{ fontSize: 12, color: "var(--on-surface-variant)" }}>No files uploaded yet.</div>
-        ) : files.map(f => (
-          <div key={f} style={s.fileRow}>
-            <span>{"📄"}</span>
-            <span style={{ fontSize: 12, flex: 1 }}>{f}</span>
-            <a href={`/api/files/download/${f}`} download={f} style={{ color: "#1a56db", fontSize: 13, fontWeight: 700, textDecoration: "none" }}>{"↓"}</a>
-            <DeleteButton onDelete={() => handleDelete(f)} />
-          </div>
+      {/* Tab switcher */}
+      <div style={{ display: "flex", gap: 0, marginBottom: 16, borderBottom: "1px solid var(--outline)" }}>
+        {[
+          { key: "files", label: "Files" },
+          { key: "inbox", label: "Inbox", badge: inboxFiles.length > 0 ? inboxFiles.length : null },
+        ].map(t => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
+            padding: "8px 16px", fontSize: 12, fontWeight: 700, border: "none", background: "transparent",
+            borderBottom: activeTab === t.key ? "2px solid #1a56db" : "2px solid transparent",
+            color: activeTab === t.key ? "#1a56db" : "var(--on-surface-variant)",
+            cursor: "pointer", display: "flex", alignItems: "center", gap: 6,
+          }}>
+            {t.label}
+            {t.badge && <span style={{ background: "#059669", color: "#fff", fontSize: 9, fontWeight: 800, padding: "1px 5px", borderRadius: 10 }}>{t.badge}</span>}
+          </button>
         ))}
       </div>
+
+      {msg && <div style={{ fontSize: 12, marginBottom: 8, color: msg.ok ? "#15803d" : "#dc2626" }}>{msg.text}</div>}
+
+      {activeTab === "files" && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <p style={{ fontSize: 12, color: "var(--on-surface-variant)" }}>Accessible to agents via file tools.</p>
+            <label style={s.uploadBtn}>
+              {uploading ? "Uploading..." : "+ Upload"}
+              <input type="file" style={{ display: "none" }} onChange={e => handleUpload(e)} disabled={uploading} />
+            </label>
+          </div>
+          <div style={s.fileList}>
+            {files.length === 0
+              ? <div style={{ fontSize: 12, color: "var(--on-surface-variant)" }}>No files yet.</div>
+              : files.map(f => <FileRow key={f} f={f} subfolder="" />)
+            }
+          </div>
+        </>
+      )}
+
+      {activeTab === "inbox" && (
+        <>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+            <p style={{ fontSize: 12, color: "var(--on-surface-variant)" }}>Files here trigger folder/file watch workflows.</p>
+            <label style={{ ...s.uploadBtn, background: "#059669" }}>
+              {uploading ? "Uploading..." : "+ Add to Inbox"}
+              <input type="file" style={{ display: "none" }} onChange={e => handleUpload(e, "inbox")} disabled={uploading} />
+            </label>
+          </div>
+          <div style={s.fileList}>
+            {inboxFiles.length === 0
+              ? <div style={{ fontSize: 12, color: "var(--on-surface-variant)" }}>Empty — upload a file to trigger your workflows.</div>
+              : inboxFiles.map(f => <FileRow key={f} f={f} subfolder="inbox" />)
+            }
+          </div>
+        </>
+      )}
     </div>
   );
 }

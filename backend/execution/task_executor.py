@@ -138,11 +138,23 @@ def run_task(self, task_id: int, existing_run_id: int = None, triggered_by: str 
                 else:
                     tool_list = all_tool_keys
 
-                available_files = os.listdir(UPLOAD_DIR) if os.path.exists(UPLOAD_DIR) else []
+                # List all files recursively so agents can see files in subdirectories (e.g. inbox/)
+                available_files = []
+                if os.path.exists(UPLOAD_DIR):
+                    for root, dirs, files in os.walk(UPLOAD_DIR):
+                        dirs[:] = [d for d in dirs if not d.startswith('.')]
+                        for f in files:
+                            if f.startswith('_run_') or f.startswith('_agent_'):
+                                continue
+                            rel = os.path.relpath(os.path.join(root, f), UPLOAD_DIR)
+                            available_files.append(rel.replace("\\", "/"))
                 files_text = "\n".join([f"- {f}" for f in available_files]) or "No files available"
 
-                # Track files created during this node's execution
-                files_before = set(available_files)
+                # Track files created during this node's execution (root level files only)
+                files_before_set = set(
+                    f for f in available_files
+                    if '/' not in f  # only root level, not inbox/file.txt
+                )
 
                 max_iterations = MAX_ITERATIONS
                 iteration = 0
@@ -325,9 +337,13 @@ RULES:
                 if len(agent_result) > MAX_OUTPUT_CHARS:
                     agent_result = agent_result[:MAX_OUTPUT_CHARS] + "\n[Output truncated]"
 
-                # Detect any files created during this node's execution
-                files_after = set(os.listdir(UPLOAD_DIR)) if os.path.exists(UPLOAD_DIR) else set()
-                new_files = files_after - files_before
+                # Detect any files created during this node's execution (files only, not dirs)
+                files_after = set(
+                    f for f in os.listdir(UPLOAD_DIR)
+                    if os.path.isfile(os.path.join(UPLOAD_DIR, f))
+                    and not f.startswith('_run_')
+                ) if os.path.exists(UPLOAD_DIR) else set()
+                new_files = files_after - files_before_set
                 if new_files:
                     file_list_str = ", ".join(new_files)
                     agent_result += f"\n\n[GENERATED FILES: {file_list_str}]"
