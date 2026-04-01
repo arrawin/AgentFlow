@@ -191,7 +191,7 @@ export default function LLMSettings() {
                 <div style={s.rangeLabels}><span>PRECISE</span><span>CREATIVE</span></div>
               </div>
               <div style={s.tuneItem}>
-                <div style={s.tuneLabel}><span>📊 Max Tokens</span><span style={s.tuneVal}>{form.max_tokens}</span></div>
+                <div style={s.tuneLabel}><span>Max Tokens</span><span style={s.tuneVal}>{form.max_tokens}</span></div>
                 <input type="range" min="512" max="8192" step="512" value={form.max_tokens}
                   onChange={e => setForm({ ...form, max_tokens: parseInt(e.target.value) })} style={s.range} />
               </div>

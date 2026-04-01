@@ -19,9 +19,10 @@ def run_python(input_data: dict) -> str:
     if not code:
         return "Error: 'code' is required for run_python"
 
-    # Write code to uploads dir — named volume, reliably mountable into containers
+    # Write code to uploads volume and run via docker with volume mount
     import time
-    code_path = os.path.join(os.getenv("UPLOAD_DIR", "/app/uploads"), f"_run_{int(time.time()*1000)}.py")
+    filename = f"_run_{int(time.time()*1000)}.py"
+    code_path = os.path.join(os.getenv("UPLOAD_DIR", "/app/uploads"), filename)
     with open(code_path, "w") as f:
         f.write(code)
 
@@ -30,19 +31,19 @@ def run_python(input_data: dict) -> str:
             [
                 "docker", "run",
                 "--rm",
-                "--network", "none",           # zero network access
+                "--network", "none",
                 "--memory", "256m",
-                "--memory-swap", "256m",       # disable swap
+                "--memory-swap", "256m",
                 "--cpus", "0.25",
                 "--pids-limit", "50",
                 "--read-only",
-                "--tmpfs", "/tmp:size=64m,noexec",  # noexec prevents running binaries from /tmp
-                "--cap-drop", "ALL",           # drop all Linux capabilities
+                "--tmpfs", "/tmp:size=64m,noexec",
+                "--cap-drop", "ALL",
                 "--security-opt", "no-new-privileges:true",
-                "--volume", f"{code_path}:/code/script.py:ro",
-                "--workdir", "/code",
+                "--volume", f"docker_uploads_data:/uploads:ro",  # named volume
+                "--workdir", "/uploads",
                 "python:3.11-slim",
-                "python", "/code/script.py"
+                "python", f"/uploads/{filename}"
             ],
             capture_output=True,
             text=True,

@@ -11,6 +11,7 @@ export default function RunHistory() {
   const [trace, setTrace] = useState([]);
   const [traceLoading, setTraceLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [triggerFilter, setTriggerFilter] = useState("all"); // "all" | "manual" | "scheduler"
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
@@ -63,6 +64,7 @@ export default function RunHistory() {
   })();
 
   const filteredRuns = runs.filter((r) => {
+    if (triggerFilter !== "all" && r.triggered_by !== triggerFilter) return false;
     if (!searchQuery) return true;
     const name = getTaskName(r.task_id).toLowerCase();
     return name.includes(searchQuery.toLowerCase()) || r.status?.includes(searchQuery.toLowerCase());
@@ -92,8 +94,14 @@ export default function RunHistory() {
               onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
             />
           </div>
-          <button style={s.filterBtn}><span>📊</span> Filters</button>
-          <button style={s.filterBtn}><span>📤</span> Export CSV</button>
+          <button style={s.filterBtn}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            Filters
+          </button>
+          <button style={s.filterBtn}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export CSV
+          </button>
         </div>
       </div>
 
@@ -115,6 +123,21 @@ export default function RunHistory() {
 
       {/* Main Table */}
       <div style={s.tableCard}>
+        {/* Filter toggle */}
+        <div style={s.tableToolbar}>
+          {["all", "manual", "scheduler"].map(f => (
+            <button
+              key={f}
+              style={{ ...s.filterToggle, ...(triggerFilter === f ? s.filterToggleActive : {}) }}
+              onClick={() => { setTriggerFilter(f); setPage(1); }}
+            >
+              {f === "all" ? "All Runs" : f === "manual" ? "Manual" : "Scheduled"}
+              <span style={{ ...s.filterCount, background: triggerFilter === f ? "#6366f120" : "#f1f5f9", color: triggerFilter === f ? "#6366f1" : "#94a3b8" }}>
+                {f === "all" ? runs.length : runs.filter(r => r.triggered_by === f).length}
+              </span>
+            </button>
+          ))}
+        </div>
         <table style={s.table}>
           <thead>
             <tr>
@@ -376,6 +399,10 @@ const s = {
   statValue: { fontSize: 28, fontWeight: 800 },
 
   tableCard: { background: "var(--surface-bright)", borderRadius: 14, boxShadow: "var(--ambient-shadow)", overflow: "hidden", marginBottom: 28 },
+  tableToolbar: { display: "flex", gap: 4, padding: "14px 16px", borderBottom: "1px solid var(--outline)" },
+  filterToggle: { display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 8, border: "none", background: "transparent", fontSize: 12, fontWeight: 600, color: "var(--on-surface-variant)", cursor: "pointer", transition: "all 150ms" },
+  filterToggleActive: { background: "#eff6ff", color: "#6366f1", fontWeight: 700 },
+  filterCount: { fontSize: 10, fontWeight: 800, padding: "2px 7px", borderRadius: 10 },
   table: { width: "100%", borderCollapse: "collapse" },
   th: { padding: "14px 20px", fontSize: 10, fontWeight: 800, color: "var(--on-surface-variant)", textAlign: "left", letterSpacing: "0.06em", background: "var(--surface-container-low)", borderBottom: "1px solid var(--outline)" },
   tr: { transition: "background 100ms" },

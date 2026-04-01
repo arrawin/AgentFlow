@@ -92,9 +92,10 @@ def run_task(self, task_id: int, existing_run_id: int = None, triggered_by: str 
             print(f"Workflow validation failed: {errors}")
             return
 
-        # Snapshot the workflow at time of run
+        # Snapshot the workflow at time of run — preserve triggered_by from existing row
         task_run.workflow_snapshot = graph
-        task_run.triggered_by = "manual"
+        if not existing_run_id:
+            task_run.triggered_by = triggered_by
         db.commit()
 
         state = {
@@ -150,6 +151,7 @@ def run_task(self, task_id: int, existing_run_id: int = None, triggered_by: str 
                 tool_call_count = 0
 
                 tool_usage_docs, tool_rules = build_tool_docs(tool_list)
+                tool_rules_text = "\n".join(f"- {r}" for r in tool_rules)
 
                 while iteration < max_iterations:
                     iteration += 1
@@ -198,7 +200,7 @@ RULES:
 - Do NOT call the same tool with same input twice
 - If a tool fails, correct your input
 - Only use files from AVAILABLE FILES for reading
-{chr(10).join(f'- {r}' for r in tool_rules)}
+{tool_rules_text}
 
 {instruction}
 """

@@ -43,6 +43,13 @@ export default function AgentManagement() {
   const domainColorMap = buildDomainColorMap(visibleDomains);
   const filteredAgents = (activeDomain ? agents.filter(a => a.domain_id === activeDomain) : agents).filter(a => !a.is_system);
 
+  // Pagination
+  const PAGE_SIZE = 9;
+  const [agentPage, setAgentPage] = useState(1);
+  const totalPages = Math.ceil(filteredAgents.length / PAGE_SIZE);
+  const pagedAgents = filteredAgents.slice((agentPage - 1) * PAGE_SIZE, agentPage * PAGE_SIZE);
+  const handleDomainChange = (id) => { setActiveDomain(id); setAgentPage(1); };
+
   return (
     <div className="animate-up" style={s.container}>
       <div style={s.content}>
@@ -61,36 +68,24 @@ export default function AgentManagement() {
             </div>
           )}
 
-          <div style={s.sidebar}>
-            <div style={s.domainList}>
-              <div style={{ ...s.domainItem, ...(activeDomain === null ? { background: "#f1f5f9", borderLeft: "3px solid #6366f1" } : {}) }}
-                onClick={() => setActiveDomain(null)}>
-                <div style={{ ...s.domainDot, background: "#6366f1" }} />
-                <span style={s.domainName}>All Domains</span>
-                <span style={s.domainCount}>{agents.filter(a => !a.is_system).length}</span>
-              </div>
-              {visibleDomains.map(d => {
-                const color = domainColorMap[d.id];
-                const count = agents.filter(a => a.domain_id === d.id && !a.is_system).length;
-                const isActive = activeDomain === d.id;
-                return (
-                  <div key={d.id}
-                    style={{ ...s.domainItem, ...(isActive ? { background: color + "15", borderLeft: `3px solid ${color}` } : {}) }}
-                    onClick={() => setActiveDomain(d.id)}>
-                    <div style={{ ...s.domainDot, background: color }} />
-                    <span style={s.domainName}>{d.name}</span>
-                    <span style={s.domainCount}>{count}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div style={s.newDomainCard}>
-              <div style={s.newDomainIcon}>⊕</div>
-              <div style={s.newDomainText}>Group agents by function — Sales, Research, etc.</div>
-              <button style={s.newDomainBtn} onClick={() => setShowDomainInput(true)}>+ New Domain</button>
-            </div>
+          <div style={s.domainList}>
+            {visibleDomains.map(d => {
+              const color = domainColorMap[d.id];
+              const count = agents.filter(a => a.domain_id === d.id && !a.is_system).length;
+              const isActive = activeDomain === d.id;
+              return (
+                <div key={d.id}
+                  style={{ ...s.domainItem, ...(isActive ? { background: color + "15", borderLeft: `3px solid ${color}` } : {}) }}
+                  onClick={() => handleDomainChange(d.id)}>
+                  <div style={{ ...s.domainDot, background: color }} />
+                  <span style={s.domainName}>{d.name}</span>
+                  <span style={s.domainCount}>{count}</span>
+                </div>
+              );
+            })}
           </div>
+
+          <button style={s.newDomainBtn} onClick={() => setShowDomainInput(true)}>+ New Domain</button>
         </div>
 
         {/* Divider */}
@@ -110,9 +105,7 @@ export default function AgentManagement() {
               </p>
             </div>
             <div style={s.mainActions}>
-              <button className="btn-secondary">Filter</button>
-              <button className="btn-secondary">Sort</button>
-              <button className="btn-primary" onClick={() => navigate("/agents/create")}>Deploy Agent</button>
+              <button className="btn-primary" onClick={() => navigate("/agents/create")}>+ Create Agent</button>
             </div>
           </div>
 
@@ -121,7 +114,7 @@ export default function AgentManagement() {
               <div style={s.empty}>Loading agents...</div>
             ) : (
               <>
-                {filteredAgents.map(a => {
+                {pagedAgents.map(a => {
                   const color = getAgentColor(a, domainColorMap);
                   return (
                     <AgentCard key={a.id} agent={a} color={color}
@@ -138,6 +131,20 @@ export default function AgentManagement() {
               </>
             )}
           </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div style={s.pagination}>
+              <span style={s.pageInfo}>Showing {(agentPage - 1) * PAGE_SIZE + 1}–{Math.min(agentPage * PAGE_SIZE, filteredAgents.length)} of {filteredAgents.length}</span>
+              <div style={s.pageControls}>
+                <button style={s.pageBtn} onClick={() => setAgentPage(p => Math.max(1, p - 1))} disabled={agentPage === 1}>‹</button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                  <button key={p} style={{ ...s.pageBtn, ...(p === agentPage ? s.pageBtnActive : {}) }} onClick={() => setAgentPage(p)}>{p}</button>
+                ))}
+                <button style={s.pageBtn} onClick={() => setAgentPage(p => Math.min(totalPages, p + 1))} disabled={agentPage === totalPages}>›</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -186,22 +193,18 @@ const s = {
 
   content: { display: "flex", gap: 0, alignItems: "flex-start" },
 
-  sidebarWrap: { width: 220, flexShrink: 0, display: "flex", flexDirection: "column", gap: 10, position: "sticky", top: 20 },
-  sideHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 0 },
-  sideTitle: { fontSize: 15, fontWeight: 800, color: "#0f172a" },
-  addBtn: { width: 26, height: 26, background: "#f1f5f9", borderRadius: 6, border: "none", fontSize: 16, fontWeight: 800, color: "#6366f1", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
-  sidebar: { background: "#fff", borderRadius: 16, padding: 16, display: "flex", flexDirection: "column", gap: 14, border: "1px solid #f1f5f9", boxShadow: "0 1px 8px rgba(15,23,42,0.06)" },
+  sidebarWrap: { width: 200, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8, position: "sticky", top: 20 },
+  sideHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
+  sideTitle: { fontSize: 11, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.08em", textTransform: "uppercase" },
+  addBtn: { width: 24, height: 24, background: "transparent", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 14, fontWeight: 800, color: "#6366f1", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" },
   domainInput: { flex: 1, padding: "6px 10px", borderRadius: 6, border: "1px solid #e2e8f0", fontSize: 12, outline: "none" },
   domainAddBtn: { background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" },
-  domainList: { display: "flex", flexDirection: "column", gap: 3 },
-  domainItem: { display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, color: "#475569", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 150ms", borderLeft: "3px solid transparent" },
+  domainList: { display: "flex", flexDirection: "column", gap: 2 },
+  domainItem: { display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 8, color: "#475569", fontSize: 13, fontWeight: 600, cursor: "pointer", transition: "all 150ms", borderLeft: "3px solid transparent" },
   domainDot: { width: 8, height: 8, borderRadius: "50%", flexShrink: 0 },
-  domainName: { flex: 1 },
+  domainName: { flex: 1, fontSize: 13 },
   domainCount: { fontSize: 11, fontWeight: 700, color: "#94a3b8" },
-  newDomainCard: { background: "#f8fafc", borderRadius: 12, padding: "16px", textAlign: "center", border: "1px dashed #e2e8f0", marginTop: 4 },
-  newDomainIcon: { fontSize: 20, color: "#94a3b8", marginBottom: 8 },
-  newDomainText: { fontSize: 11, color: "#94a3b8", lineHeight: 1.5, marginBottom: 12 },
-  newDomainBtn: { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 14px", fontSize: 11, fontWeight: 700, color: "#475569", cursor: "pointer", width: "100%" },
+  newDomainBtn: { background: "transparent", border: "1px dashed #e2e8f0", borderRadius: 8, padding: "7px 14px", fontSize: 11, fontWeight: 700, color: "#94a3b8", cursor: "pointer", width: "100%", marginTop: 4 },
 
   divider: { width: 1, background: "#e2e8f0", alignSelf: "stretch", margin: "0 28px", flexShrink: 0 },
 
@@ -231,5 +234,10 @@ const s = {
   addText: { fontSize: 11, color: "#94a3b8", lineHeight: 1.5 },
 
   empty: { padding: 40, textAlign: "center", color: "#94a3b8" },
+  pagination: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 24, paddingTop: 16, borderTop: "1px solid #f1f5f9" },
+  pageInfo: { fontSize: 12, color: "#94a3b8" },
+  pageControls: { display: "flex", gap: 4 },
+  pageBtn: { width: 30, height: 30, borderRadius: 6, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, fontWeight: 700, color: "#475569", cursor: "pointer" },
+  pageBtnActive: { background: "#6366f1", color: "#fff", border: "1px solid #6366f1" },
   toast: { position: "fixed", bottom: 24, right: 24, padding: "10px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: "0 4px 20px rgba(0,0,0,0.1)", zIndex: 9999 },
 };

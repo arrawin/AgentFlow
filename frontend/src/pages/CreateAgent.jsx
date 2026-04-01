@@ -19,14 +19,56 @@ export default function CreateAgent() {
   });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [domainSuggestion, setDomainSuggestion] = useState(null);
+  const [userPickedDomain, setUserPickedDomain] = useState(false);
+  const [dryRunPrompt, setDryRunPrompt] = useState("");
+  const [dryRunResult, setDryRunResult] = useState(null);
+  const [dryRunning, setDryRunning] = useState(false);
+
+  const handleDryRun = async () => {
+    if (!dryRunPrompt.trim() || !id) return;
+    setDryRunning(true);
+    setDryRunResult(null);
+    try {
+      const res = await api.post(`/agents/${id}/dry-run`, { sample_prompt: dryRunPrompt });
+      setDryRunResult(res.data);
+    } catch (e) {
+      setDryRunResult({ output: e.response?.data?.detail || "Dry run failed", tool_calls: [] });
+    } finally {
+      setDryRunning(false);
+    }
+  }; // true once user explicitly selects
+
+  const suggestDomain = async (skillContent) => {
+    if (!skillContent || skillContent.length < 20 || userPickedDomain) return;
+    setSuggesting(true);
+    try {
+      const res = await api.post("/agents/suggest-domain", { skill_content: skillContent });
+      setDomainSuggestion(res.data);
+    } catch { /* silent */ }
+    finally { setSuggesting(false); }
+  };
+
+  const applySuggestion = async () => {
+    if (!domainSuggestion) return;
+    if (!domainSuggestion.is_new) {
+      setForm(f => ({ ...f, domain_id: String(domainSuggestion.domain_id) }));
+    } else {
+      // Create the new domain then assign it
+      try {
+        const res = await api.post("/domains", { name: domainSuggestion.domain });
+        setDomains(prev => [...prev, res.data]);
+        setForm(f => ({ ...f, domain_id: String(res.data.id) }));
+      } catch { /* silent */ }
+    }
+    setDomainSuggestion(null);
+  };
 
   useEffect(() => {
     api.get("/domains").then(r => {
       setDomains(r.data);
-      if (!isEdit) {
-        const first = r.data.find(d => d.name !== "SYSTEM");
-        if (first) setForm(f => ({ ...f, domain_id: String(first.id) }));
-      }
+      // Don't auto-select — let user pick or let suggestion handle it
     }).catch(console.error);
     api.get("/llm-configs").then(r => setLlmConfigs(r.data)).catch(console.error);
 
@@ -75,7 +117,7 @@ export default function CreateAgent() {
     }
   };
 
-  const DOMAIN_ICONS = ["🎧", "📊", "⌨️", "✨", "🔬", "🛡️", "🧬", "🚀", "💡", "🤖"];
+  const DOMAIN_ICONS = null; // replaced with colored dot in domain items
 
   return (
     <div className="animate-up" style={s.page}>
@@ -104,9 +146,11 @@ export default function CreateAgent() {
               <div
                 key={d.id}
                 style={{ ...s.domainItem, ...(form.domain_id === String(d.id) ? s.domainItemActive : {}) }}
-                onClick={() => setForm(f => ({ ...f, domain_id: String(d.id) }))}
+                onClick={() => { setForm(f => ({ ...f, domain_id: String(d.id) })); setUserPickedDomain(true); setDomainSuggestion(null); }}
               >
-                <span style={s.domainIcon}>{DOMAIN_ICONS[i % DOMAIN_ICONS.length]}</span>
+                <span style={{ ...s.domainIcon, background: "#6366f120", borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="2"><circle cx="12" cy="7" r="4"/><path d="M4 21v-2a4 4 0 014-4h8a4 4 0 014 4v2"/></svg>
+                </span>
                 <span style={s.domainName}>{d.name}</span>
               </div>
             ))}
@@ -122,7 +166,7 @@ export default function CreateAgent() {
         <div style={s.rightCol}>
           {/* Core Identity */}
           <div style={s.formSection}>
-            <div style={s.formSectionHeader}>◆ CORE IDENTITY</div>
+            <div style={s.formSectionHeader}>CORE IDENTITY</div>
             <div style={s.formGrid}>
               <div style={s.inputGroup}>
                 <label style={s.inputLabel}>Agent Name</label>
@@ -138,7 +182,7 @@ export default function CreateAgent() {
                 <select
                   style={s.input}
                   value={form.domain_id}
-                  onChange={e => setForm(f => ({ ...f, domain_id: e.target.value }))}
+                  onChange={e => { setForm(f => ({ ...f, domain_id: e.target.value })); setUserPickedDomain(true); setDomainSuggestion(null); }}
                 >
                   <option value="">Select domain</option>
                   {domains.filter(d => d.name !== "SYSTEM").map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -160,7 +204,7 @@ export default function CreateAgent() {
 
           {/* Cognitive Skills */}
           <div style={s.formSection}>
-            <div style={s.formSectionHeader}>◆ COGNITIVE SKILLS</div>
+            <div style={s.formSectionHeader}>COGNITIVE SKILLS</div>
             <div style={s.skillsTabs}>
               <button
                 style={skillMode === "type" ? s.skillTabActive : s.skillTab}
@@ -177,12 +221,31 @@ export default function CreateAgent() {
             </div>
 
             {skillMode === "type" ? (
-              <textarea
-                style={s.textarea}
-                placeholder="Define the agent's behavior, constraints, and operational goals here..."
-                value={form.skills}
-                onChange={e => setForm(f => ({ ...f, skills: e.target.value }))}
-              />
+              <>
+                <textarea
+                  style={s.textarea}
+                  placeholder="Define the agent's behavior, constraints, and operational goals here..."
+                  value={form.skills}
+                  onChange={e => {
+                    setForm(f => ({ ...f, skills: e.target.value }));
+                    setDomainSuggestion(null);
+                  }}
+                  onBlur={e => suggestDomain(e.target.value)}
+                />
+                {suggesting && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>✦ Suggesting domain...</div>}
+                {domainSuggestion && !userPickedDomain && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 6, padding: "8px 12px", background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe" }}>
+                    <span style={{ fontSize: 12, color: "#1d4ed8", flex: 1 }}>
+                      ✦ Suggested domain: <strong>{domainSuggestion.domain}</strong>
+                      {domainSuggestion.is_new ? " (new)" : " (existing)"}
+                    </span>
+                    <button style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }} onClick={applySuggestion}>
+                      Apply
+                    </button>
+                    <button style={{ background: "transparent", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 13 }} onClick={() => setDomainSuggestion(null)}>✕</button>
+                  </div>
+                )}
+              </>
             ) : (
               <div style={s.uploadArea}>
                 <input
@@ -236,6 +299,47 @@ export default function CreateAgent() {
             )}
             <div style={s.hintText}>✦ Skills define how the agent behaves and what it focuses on.</div>
           </div>
+
+          {/* Dry Run Panel — only shown when editing an existing agent */}
+          {isEdit && (
+            <div style={s.formSection}>
+              <div style={s.formSectionHeader}>DRY RUN</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <input
+                    style={{ ...s.input, flex: 1 }}
+                    placeholder="Enter a sample prompt to test this agent..."
+                    value={dryRunPrompt}
+                    onChange={e => setDryRunPrompt(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && handleDryRun()}
+                  />
+                  <button
+                    style={{ background: "#6366f1", color: "#fff", border: "none", borderRadius: 10, padding: "10px 20px", fontSize: 12, fontWeight: 700, cursor: "pointer", opacity: dryRunning ? 0.6 : 1 }}
+                    onClick={handleDryRun}
+                    disabled={dryRunning}
+                  >
+                    {dryRunning ? "Running..." : "Execute"}
+                  </button>
+                </div>
+                {dryRunResult && (
+                  <div style={{ background: "#0f172a", borderRadius: 10, padding: 16 }}>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: "#64748b", letterSpacing: "0.06em", marginBottom: 8 }}>OUTPUT — real LLM response</div>
+                    {dryRunResult.tool_calls?.length > 0 && (
+                      <div style={{ marginBottom: 10 }}>
+                        {dryRunResult.tool_calls.map((tc, i) => (
+                          <div key={i} style={{ display: "flex", gap: 8, marginBottom: 4 }}>
+                            <span style={{ fontSize: 10, fontWeight: 700, color: "#818cf8", background: "#1e1b4b", padding: "2px 8px", borderRadius: 4 }}>{tc.tool}</span>
+                            <span style={{ fontSize: 11, color: "#94a3b8" }}>{tc.result}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <pre style={{ fontSize: 12, color: "#e2e8f0", lineHeight: 1.6, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{dryRunResult.output}</pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Footer */}
           <div style={s.footer}>

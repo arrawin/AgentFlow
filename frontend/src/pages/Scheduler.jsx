@@ -142,10 +142,18 @@ export default function Scheduler() {
 
       {/* Stat Cards */}
       <div style={s.statsRow}>
-        <StatCard icon="⚡" iconBg="#fef9c3" iconColor="#ca8a04" label="ACTIVE TRIGGERS" value={enabled} trend={`${schedules.length} total`} />
-        <StatCard icon="✓" iconBg="#dcfce7" iconColor="#16a34a" label="SUCCESSFUL RUNS" value={successRuns} trend="Steady" trendOk />
-        <StatCard icon="◉" iconBg="#eff6ff" iconColor="#3b82f6" label="SCHEDULED RUNS" value={scheduledRuns.length} trend="Queued" />
-        <StatCard icon="▲" iconBg="#fef2f2" iconColor="#ef4444" label="FAILED ATTEMPTS" value={failedRuns} trend={failedRuns > 0 ? `-${failedRuns}` : "None"} trendBad={failedRuns > 0} />
+        <StatCard
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>}
+          iconBg="#fef9c3" iconColor="#ca8a04" label="ACTIVE TRIGGERS" value={enabled} trend={`${schedules.length} total`} />
+        <StatCard
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>}
+          iconBg="#dcfce7" iconColor="#16a34a" label="SUCCESSFUL RUNS" value={successRuns} trend="Steady" trendOk />
+        <StatCard
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>}
+          iconBg="#eff6ff" iconColor="#3b82f6" label="SCHEDULED RUNS" value={scheduledRuns.length} trend="Queued" />
+        <StatCard
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>}
+          iconBg="#fef2f2" iconColor="#ef4444" label="FAILED ATTEMPTS" value={failedRuns} trend={failedRuns > 0 ? `-${failedRuns}` : "None"} trendBad={failedRuns > 0} />
       </div>
 
       {/* Main: Table + Queue */}
@@ -153,7 +161,7 @@ export default function Scheduler() {
         {/* Active Triggers Table */}
         <div style={s.tableCard}>
           <div style={s.cardHeader}>
-            <span style={s.cardTitle}>⚡ Active Triggers</span>
+            <span style={s.cardTitle}>Active Triggers</span>
           </div>
           <table style={s.table}>
             <thead>
@@ -216,8 +224,8 @@ export default function Scheduler() {
         {/* Upcoming Queue Sidebar */}
         <div style={s.queueCard}>
           <div style={s.cardHeader}>
-            <span style={s.cardTitle}>⏱ Upcoming</span>
-            <span style={{ fontSize: 10, fontWeight: 700, color: "#64748b" }}>{upcomingRuns.length} queued</span>
+            <span style={s.cardTitle}>Upcoming</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", background: "#6366f1", padding: "2px 8px", borderRadius: 10 }}>{upcomingRuns.length} queued</span>
           </div>
           {upcomingRuns.length === 0 ? (
             <div style={s.queueEmpty}>No active schedules. Enable a schedule to see upcoming runs.</div>
@@ -242,7 +250,7 @@ export default function Scheduler() {
 
       {/* Recent Activity Logs */}
       <div style={s.logsSection}>
-        <div style={s.cardTitle}>🕐 Recent Activity Logs</div>
+        <div style={s.cardTitle}>Recent Activity Logs</div>
         <div style={s.logsGrid}>
           {runs.filter(r => r.triggered_by === "scheduler").slice(0, 6).length === 0 ? (
             <div style={{ fontSize: 13, color: "#94a3b8", padding: "20px 0" }}>No scheduled activity yet.</div>
@@ -439,7 +447,7 @@ const s = {
   mainLayout: { display: "grid", gridTemplateColumns: "1fr 260px", gap: 20, marginBottom: 32 },
 
   tableCard: { background: "#fff", borderRadius: 14, boxShadow: "0 1px 8px rgba(15,23,42,0.06)", border: "1px solid #f1f5f9", overflow: "hidden" },
-  cardHeader: { padding: "18px 20px 14px", borderBottom: "1px solid #f1f5f9" },
+  cardHeader: { padding: "18px 20px 14px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center" },
   cardTitle: { fontSize: 15, fontWeight: 800, color: "#0f172a" },
   table: { width: "100%", borderCollapse: "collapse" },
   theadRow: { background: "#f8fafc" },

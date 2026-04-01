@@ -203,7 +203,7 @@ function DryRunPanel({ result, selectedNode, onSelectNode, onClose }) {
     <div style={dr.wrap}>
       <div style={dr.header}>
         <div>
-          <div style={dr.title}>⚡ Dry Run Results — {result.task_name}</div>
+          <div style={dr.title}>Dry Run — {result.task_name}</div>
           <div style={dr.sub}>{result.nodes.length} agents · {result.total_ms}ms total · No real API calls made</div>
         </div>
         <button style={dr.closeBtn} onClick={onClose}>✕</button>
@@ -297,7 +297,7 @@ export default function TaskManagement() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [runStatus, setRunStatus] = useState({});
-  const [tab, setTab] = useState("create");
+  const [tab, setTab] = useState("list");
 
   // React Flow state
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -630,12 +630,14 @@ export default function TaskManagement() {
           <p style={s.pageSub}>Define architectural logic and agent coordination workflows.</p>
         </div>
         <div style={s.headerActions}>
-          <button style={s.saveDraftBtn} onClick={() => setTab("list")}>
-            {tab === "list" ? "+ New Sequence" : "View All Tasks"}
+          <button style={s.saveDraftBtn} onClick={() => { setTab(tab === "list" ? "create" : "list"); setEditingTask(null); setNodes([]); setEdges([]); setForm({ name: "", description: "" }); }}>
+            {tab === "list" ? "+ Create Workflow" : "← All Tasks"}
           </button>
-          <button className="btn-primary" style={s.publishBtn} onClick={handlePublish} disabled={saving}>
-            {saving ? "Saving..." : editingTask ? "Save Changes" : "Publish Sequence"}
-          </button>
+          {tab !== "list" && (
+            <button className="btn-primary" style={s.publishBtn} onClick={handlePublish} disabled={saving}>
+              {saving ? "Saving..." : editingTask ? "Save Changes" : "Publish Sequence"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -683,7 +685,7 @@ export default function TaskManagement() {
                     onClick={() => handleDryRun(task.id)}
                     disabled={dryRunning === task.id}
                   >
-                    {dryRunning === task.id ? "⏳ Running..." : "⚡ Dry Run"}
+                    {dryRunning === task.id ? "Running..." : "Dry Run"}
                   </button>
                   <button style={s.editBtn} onClick={() => handleEdit(task)}>Edit</button>
                   <button style={s.deleteBtn} onClick={() => handleDelete(task.id)}>Delete</button>
@@ -743,7 +745,7 @@ export default function TaskManagement() {
                   onClick={handleGenerate}
                   disabled={generating}
                 >
-                  {generating ? "⏳ Generating..." : "✦ Generate Workflow"}
+                  {generating ? "Generating..." : "✦ Generate Workflow"}
                 </button>
               )}
             </div>
