@@ -323,8 +323,9 @@ RULES:
                             })
 
                         log(node_id, agent.id, "tool_result", str(tool_result)[:500])
-                        # Wrap external data in envelope to prevent prompt injection
-                        agent_result += f"\n\nTool '{tool_name}' result:\n<external_data>\n{tool_result}\n</external_data>\n"
+                        # Cap tool result to 3000 chars to avoid 413 payload errors
+                        tool_result_capped = str(tool_result)[:3000] + ("\n...[truncated for length]" if len(str(tool_result)) > 3000 else "")
+                        agent_result += f"\n\nTool '{tool_name}' result:\n<external_data>\n{tool_result_capped}\n</external_data>\n"
                         continue
 
                     agent_result = result

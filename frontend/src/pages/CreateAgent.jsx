@@ -246,16 +246,6 @@ export default function CreateAgent() {
         {dryRunResult && (
           <div style={s.dryRunOutput}>
             <div style={{ fontSize: 10, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.06em", marginBottom: 10 }}>OUTPUT</div>
-            {dryRunResult.tool_calls?.length > 0 && (
-              <div style={{ marginBottom: 12, display: "flex", flexDirection: "column", gap: 4 }}>
-                {dryRunResult.tool_calls.map((tc, i) => (
-                  <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-                    <span style={{ fontSize: 10, fontWeight: 700, color: "#6366f1", background: "#ede9fe", padding: "2px 8px", borderRadius: 4, flexShrink: 0 }}>{tc.tool}</span>
-                    <span style={{ fontSize: 11, color: "#64748b" }}>{tc.result}</span>
-                  </div>
-                ))}
-              </div>
-            )}
             <pre style={{ fontSize: 12, color: "#334155", lineHeight: 1.7, margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{dryRunResult.output}</pre>
           </div>
         )}

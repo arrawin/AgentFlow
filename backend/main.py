@@ -14,6 +14,7 @@ from api.routes.schedules import router as schedules_router
 from api.routes.dashboard import router as dashboard_router
 from api.routes.tools import router as tools_router
 from api.routes.internal import router as internal_router
+from api.routes.notifications import router as notifications_router
 
 app = FastAPI(title="Workflow Orchestration API")
 
@@ -45,6 +46,7 @@ app.include_router(schedules_router, prefix="/api", tags=["schedules"])
 app.include_router(dashboard_router, prefix="/api", tags=["dashboard"])
 app.include_router(tools_router, prefix="/api", tags=["tools"])
 app.include_router(internal_router, tags=["internal"])
+app.include_router(notifications_router, prefix="/api", tags=["notifications"])
 
 
 @app.get("/")

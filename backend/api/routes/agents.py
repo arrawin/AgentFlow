@@ -117,10 +117,9 @@ def agent_dry_run(agent_id: int, req: AgentDryRunRequest, db: Session = Depends(
 
     from services.llm_service import LLMService
     from db.models import LLMConfig
-    from tools.registry import TOOLS
+    from tools.registry import TOOLS, build_tool_docs
     import json, re
 
-    # Use agent's LLM config or fall back to default
     llm_config = None
     if agent.llm_config_id:
         llm_config = db.query(LLMConfig).filter(LLMConfig.id == agent.llm_config_id).first()
@@ -129,64 +128,102 @@ def agent_dry_run(agent_id: int, req: AgentDryRunRequest, db: Session = Depends(
 
     llm = LLMService(llm_config=llm_config)
     skills = agent.skills or "No specific skills defined."
-    tool_list = agent.allowed_tools or []
+    tool_list = [t for t in (agent.allowed_tools or []) if t in TOOLS]
 
-    tool_docs = ""
-    if tool_list:
-        tool_docs = f'\nAvailable tools: {tool_list}\nTo call a tool respond with ONLY:\n{{"action": "tool_call", "tool_name": "<name>", "input": <input>}}'
+    tool_docs, tool_rules = build_tool_docs(tool_list)
+    tool_rules_text = "\n".join(f"- {r}" for r in tool_rules)
 
-    prompt = f"""You are: {agent.name}
+    agent_result = ""
+    tool_calls_log = []
+    tool_history = []
+    max_iterations = 6
+
+    for iteration in range(max_iterations):
+        if agent_result:
+            instruction = "You have tool results above. Write your FINAL ANSWER as plain text now."
+        else:
+            instruction = f"""{tool_docs}
+Available tools: {tool_list}
+Do NOT add any text before or after the JSON when calling a tool."""
+
+        prompt = f"""You are: {agent.name}
 {skills}
 
 TASK:
 {req.sample_prompt}
-{tool_docs}
 
-Write your response now."""
+YOUR TOOL RESULTS SO FAR:
+{agent_result if agent_result else "None"}
 
-    result = llm.generate(prompt)
-    if not result:
-        raise HTTPException(status_code=502, detail="LLM returned no response")
+RULES:
+- Do NOT call the same tool with same input twice
+- If a tool fails, correct your input
+{tool_rules_text}
 
-    # Check if LLM tried to call a tool and execute it
-    tool_calls = []
-    clean = re.sub(r"```(?:json)?|```", "", result).strip()
-    try:
-        for i, c in enumerate(clean):
-            if c == '{':
-                depth = 0
-                for j, ch in enumerate(clean[i:]):
-                    if ch == '{': depth += 1
-                    elif ch == '}':
-                        depth -= 1
-                        if depth == 0:
-                            candidate = clean[i:i+j+1]
-                            try:
-                                parsed = json.loads(candidate)
-                                tool_name = parsed.get("tool_name") or parsed.get("action")
-                                if tool_name and tool_name in TOOLS and tool_name in tool_list:
-                                    tool_fn = TOOLS[tool_name]
-                                    tool_result = tool_fn(parsed.get("input", {}))
-                                    tool_calls.append({"tool": tool_name, "result": str(tool_result)[:500]})
-                                    # Feed result back to LLM for final answer
-                                    followup = f"""{prompt}
+{instruction}"""
 
-Tool '{tool_name}' result:
-{tool_result}
+        result = llm.generate(prompt)
+        if not result:
+            break
 
-Now write your FINAL ANSWER as plain text."""
-                                    result = llm.generate(followup) or result
-                            except Exception:
-                                pass
-                            break
-                if tool_calls:
-                    break
-    except Exception:
-        pass
+        # Parse tool call
+        clean = re.sub(r"```(?:json)?|```", "", result).strip()
+        tool_call = None
+        try:
+            for i, c in enumerate(clean):
+                if c == '{':
+                    depth = 0
+                    for j, ch in enumerate(clean[i:]):
+                        if ch == '{': depth += 1
+                        elif ch == '}':
+                            depth -= 1
+                            if depth == 0:
+                                candidate = clean[i:i+j+1]
+                                try:
+                                    parsed = json.loads(candidate)
+                                    tool_name = parsed.get("tool_name")
+                                    action = parsed.get("action", "")
+                                    if tool_name and (action == "tool_call" or action in TOOLS):
+                                        tool_call = parsed
+                                    elif not tool_name and action in TOOLS:
+                                        parsed["tool_name"] = action
+                                        tool_call = parsed
+                                except Exception:
+                                    pass
+                                break
+                    if tool_call:
+                        break
+        except Exception:
+            pass
+
+        if tool_call:
+            tool_name = tool_call.get("tool_name")
+            tool_input = tool_call.get("input", {})
+
+            # Duplicate check
+            if any(t["tool"] == tool_name and t["input"] == tool_input for t in tool_history):
+                agent_result += "\n[Duplicate tool call blocked]\n"
+                agent_result = result
+                break
+
+            if tool_name in tool_list:
+                tool_fn = TOOLS.get(tool_name)
+                if tool_fn:
+                    try:
+                        tool_result = tool_fn(tool_input)
+                    except Exception as e:
+                        tool_result = f"Tool error: {str(e)}"
+                    tool_history.append({"tool": tool_name, "input": tool_input})
+                    tool_calls_log.append({"tool": tool_name, "result": str(tool_result)[:500]})
+                    agent_result += f"\nTool '{tool_name}' result:\n<external_data>\n{tool_result}\n</external_data>\n"
+                    continue
+
+        agent_result = result
+        break
 
     return {
         "agent_name": agent.name,
-        "output": result,
-        "tool_calls": tool_calls,
+        "output": agent_result,
+        "tool_calls": tool_calls_log,
         "note": "Real LLM run — tokens were consumed"
     }
