@@ -174,17 +174,24 @@ tr:hover td { background: var(--surface-container-low); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* React Flow - remove default node border/shadow */
+/* React Flow - remove default node border/shadow, keep card styles */
 .react-flow__node {
   border: none !important;
   box-shadow: none !important;
   background: transparent !important;
   padding: 0 !important;
+  border-radius: 0 !important;
 }
 
-.react-flow__node.selected > div,
-.react-flow__node:focus > div {
-  border-color: var(--secondary) !important;
+/* But let the inner card div handle its own background */
+.react-flow__node > div {
+  background: revert;
+}
+
+.react-flow__node.selected > div {
+  outline: 2px solid var(--secondary);
+  outline-offset: 2px;
+  border-radius: 14px;
 }
 
 /* ─── Modal blur ─── */
@@ -199,4 +206,29 @@ tr:hover td { background: var(--surface-container-low); }
 @keyframes nodePulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
+}
+
+/* Running node spinning border */
+@keyframes spin-border {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@keyframes running-glow {
+  0%, 100% { box-shadow: 0 0 0 2px #6366f1, 0 0 8px rgba(99,102,241,0.4); }
+  50%       { box-shadow: 0 0 0 3px #818cf8, 0 0 16px rgba(99,102,241,0.6); }
+}
+
+.node-running {
+  animation: running-glow 1.2s ease-in-out infinite !important;
+  border-color: #6366f1 !important;
+}
+
+/* Override React Flow selected node border */
+.react-flow__node.selected {
+  outline: none !important;
+  box-shadow: none !important;
+}
+.react-flow__node.selected > div {
+  outline: none !important;
 }

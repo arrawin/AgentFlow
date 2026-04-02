@@ -3,6 +3,7 @@ import api from "../api/client";
 import { getTasks, runTask, dryRunTask } from "../api/tasks";
 import { getWorkflows } from "../api/workflows";
 import { getAgents } from "../api/agents";
+import { useNavigate } from "react-router-dom";
 import { buildDomainColorMap, getDomainColor } from "../utils/colors";
 import { MarkdownLight } from "../components/MarkdownOutput";
 import {
@@ -288,6 +289,7 @@ const dr = {
 };
 
 export default function TaskManagement() {
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState([]);
   const [workflows, setWorkflows] = useState([]);
   const [agents, setAgents] = useState([]);
@@ -304,11 +306,19 @@ export default function TaskManagement() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
   const [rfInstance, setRfInstance] = useState(null);
 
-  useEffect(() => {
+  const fetchAll = () => {
     getAgents().then((d) => setAgents(d.filter((a) => !a.is_system)));
     getTasks().then(setTasks);
     getWorkflows().then(setWorkflows);
     api.get("/domains").then((r) => setDomains(r.data));
+  };
+
+  useEffect(() => {
+    fetchAll();
+    // Re-fetch when user navigates back to this tab
+    const onFocus = () => fetchAll();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   const onConnect = useCallback(
@@ -499,6 +509,41 @@ export default function TaskManagement() {
     }
   };
 
+  const handleSave = async () => {
+    if (!form.name || nodes.length === 0) {
+      setError("Task name and at least one agent step are required.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const flowNodes = nodes.map((n, i) => ({ id: `n${i + 1}`, agent_id: n.data.agentId }));
+      const nodeIdMap = {};
+      nodes.forEach((n, i) => { nodeIdMap[n.id] = `n${i + 1}`; });
+      const flowEdges = edges.map((e) => ({ from: nodeIdMap[e.source], to: nodeIdMap[e.target] })).filter((e) => e.from && e.to);
+
+      if (editingTask) {
+        await api.put(`/workflows/${editingTask.workflow_id}`, { name: form.name, graph_json: { nodes: flowNodes, edges: flowEdges } });
+        const updated = await api.put(`/tasks/${editingTask.id}`, { name: form.name, description: form.description });
+        setTasks(prev => prev.map(t => t.id === editingTask.id ? updated.data : t));
+        showToast("Changes saved");
+      } else {
+        const wf = await api.post("/workflows", { name: form.name, graph_json: { nodes: flowNodes, edges: flowEdges } });
+        const task = await api.post("/tasks", { name: form.name, description: form.description, workflow_id: wf.data.id });
+        setTasks(prev => [...prev, task.data]);
+        // Set as editing task so future saves update instead of create
+        setEditingTask(task.data);
+        showToast("Workflow saved");
+      }
+      fetchAll();
+    } catch (e) {
+      const d = e.response?.data?.detail;
+      setError(typeof d === "object" ? JSON.stringify(d) : d || "Error saving");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handlePublish = async () => {
     if (!form.name || nodes.length === 0) {
       setError("Task name and at least one agent step are required.");
@@ -513,7 +558,6 @@ export default function TaskManagement() {
       const flowEdges = edges.map((e) => ({ from: nodeIdMap[e.source], to: nodeIdMap[e.target] })).filter((e) => e.from && e.to);
 
       if (editingTask) {
-        // Update existing workflow + task
         await api.put(`/workflows/${editingTask.workflow_id}`, { name: form.name, graph_json: { nodes: flowNodes, edges: flowEdges } });
         const updated = await api.put(`/tasks/${editingTask.id}`, { name: form.name, description: form.description });
         setTasks(prev => prev.map(t => t.id === editingTask.id ? updated.data : t));
@@ -530,6 +574,7 @@ export default function TaskManagement() {
       setEdges([]);
       setForm({ name: "", description: "" });
       setTab("list");
+      fetchAll();
     } catch (e) {
       const d = e.response?.data?.detail;
       setError(typeof d === "object" ? JSON.stringify(d) : d || "Error saving task sequence");
@@ -617,7 +662,6 @@ export default function TaskManagement() {
 
   const getAgentName = (id) => agents.find((a) => a.id === id)?.name || `Agent #${id}`;
   const getWorkflow = (id) => workflows.find((w) => w.id === id);
-
   return (
     <div className="animate-up" style={s.page}>
       {/* Page Header */}
@@ -675,10 +719,10 @@ export default function TaskManagement() {
                 <div style={s.taskRowActions}>
                   <span style={s.nodeCount}>{nodes.length} Nodes</span>
                   <button
-                    style={{ ...s.runBtn, ...(status === "queued" ? { background: "#15803d" } : {}) }}
-                    onClick={() => handleRun(task.id)}
+                    style={s.runBtn}
+                    onClick={() => navigate(`/tasks/${task.id}/canvas`)}
                   >
-                    {status === "queuing" ? "..." : status === "queued" ? "✓ Queued" : "▶ Run"}
+                    ▶ Run
                   </button>
                   <button
                     style={{ ...s.dryRunBtn, ...(dryRunning === task.id ? { opacity: 0.6 } : {}) }}
@@ -869,7 +913,16 @@ export default function TaskManagement() {
               </div>
             </div>
           </div>
-          {/* Dry Run Results Panel — shown below canvas after dry run */}
+
+          {/* Save button below canvas */}
+          {!dryRunResult && (
+            <div style={s.canvasSaveBar}>
+              <button style={s.canvasSaveBtn} onClick={handleSave} disabled={saving}>
+                {saving ? "Saving..." : "💾 Save Workflow"}
+              </button>
+              <span style={s.canvasSaveHint}>Saves to DB without leaving this page</span>
+            </div>
+          )}
           {dryRunResult && (
             <DryRunPanel
               result={dryRunResult}
@@ -906,6 +959,9 @@ const s = {
   headerActions: { display: "flex", gap: 10, alignItems: "center" },
   saveDraftBtn: { background: "var(--surface-bright)", border: "1px solid var(--outline)", color: "var(--on-surface)", padding: "9px 18px", borderRadius: 8, fontSize: 12, fontWeight: 700 },
   publishBtn: { padding: "9px 20px", fontSize: 12 },
+  canvasSaveBar: { display: "flex", alignItems: "center", gap: 12, padding: "14px 0", marginTop: 4 },
+  canvasSaveBtn: { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 20px", fontSize: 13, fontWeight: 700, color: "#0f172a", cursor: "pointer", boxShadow: "0 1px 4px rgba(15,23,42,0.06)" },
+  canvasSaveHint: { fontSize: 11, color: "#94a3b8" },
 
   // Meta Row
   metaRow: { display: "grid", gridTemplateColumns: "1fr 280px", gap: 20, marginBottom: 24 },

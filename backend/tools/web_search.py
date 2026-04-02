@@ -32,9 +32,14 @@ def web_search(input_data):
 
     data = response.json()
 
+    # Include direct answer if available
+    answer = data.get("answer", "")
     results = data.get("results", [])
 
     formatted = []
+    if answer:
+        formatted.append(f"DIRECT ANSWER: {answer}")
+
     for r in results:
         title = r.get("title", "")
         content = r.get("content", "")

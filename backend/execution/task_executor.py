@@ -4,7 +4,7 @@ from db.models import Agent, Task, Workflow, TaskRun, RunLog
 from services.llm_service import LLMService
 from execution.context_summariser import summarise_if_long
 from langgraph.graph import StateGraph
-from tools.registry import TOOLS, is_unsafe, build_tool_docs
+from tools.registry import TOOLS, TOOL_SCHEMAS, is_unsafe, build_tool_docs
 from tools.utils import UPLOAD_DIR
 from validation.workflow_validator import validate_workflow
 from datetime import datetime
@@ -162,174 +162,107 @@ def run_task(self, task_id: int, existing_run_id: int = None, triggered_by: str 
                 has_written_file = False
                 tool_call_count = 0
 
-                tool_usage_docs, tool_rules = build_tool_docs(tool_list)
-                tool_rules_text = "\n".join(f"- {r}" for r in tool_rules)
+                # Build tool schemas for native function calling
+                agent_tool_schemas = [TOOL_SCHEMAS[t] for t in tool_list if t in TOOL_SCHEMAS]
 
-                while iteration < max_iterations:
-                    iteration += 1
-
-                    if agent_result or context:
-                        if agent_result and has_written_file:
-                            # Already wrote a file — wrap up
-                            instruction = "You have written a file successfully. Write your FINAL ANSWER as plain text now summarizing what you did and the filename. Do NOT call any more tools."
-                        elif agent_result:
-                            if "file_writer" in tool_list:
-                                instruction = f"""You have tool results above.
-If the task requires writing/creating/saving output to a file, call file_writer now.
-If you still need more information, you may call another tool.
-Otherwise, write your FINAL ANSWER as plain text now.
-Available tools: {tool_list}"""
-                            else:
-                                instruction = "You have tool results above. Write your FINAL ANSWER as plain text now. Do NOT call any more tools."
-                        else:
-                            instruction = f"""You have context from previous agents above.
-If you need more information, call a tool using ONLY this JSON (no extra text):
-{{"action": "tool_call", "tool_name": "<tool_name>", "input": <input_object>}}
-Available tools: {tool_list}
-Otherwise, write your FINAL ANSWER as plain text using the context provided."""
-                    else:
-                        instruction = f"""{tool_usage_docs}
-
-Available tools: {tool_list}
-Do NOT add any text before or after the JSON when calling a tool."""
-
-                    prompt = f"""You are: {agent.name}
+                # Build conversation messages
+                system_prompt = f"""You are: {agent.name}
 {skills_text}
-
-TASK:
-{state['input']}
-
-CONTEXT FROM PREVIOUS AGENTS:
-{context if context else "None"}
-
-YOUR TOOL RESULTS SO FAR:
-{agent_result if agent_result else "None"}
 
 AVAILABLE FILES:
 {files_text}
 
 RULES:
 - Do NOT call the same tool with same input twice
-- If a tool fails, correct your input
 - Only use files from AVAILABLE FILES for reading
-{tool_rules_text}
+- If the task requires saving output to a file, use file_writer"""
 
-{instruction}
-"""
+                if context:
+                    system_prompt += f"\n\nCONTEXT FROM PREVIOUS AGENTS:\n{context}"
 
-                    llm = LLMService(llm_config=llm_config)
-                    result = llm.generate(prompt)
+                messages = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": state['input']}
+                ]
 
-                    if not result:
-                        result = "Error: No response from LLM"
+                llm = LLMService(llm_config=llm_config)
+
+                while iteration < max_iterations and tool_call_count < MAX_TOOL_CALLS:
+                    iteration += 1
+
+                    # Use native function calling if tools available
+                    if agent_tool_schemas:
+                        response_msg = llm.generate_with_tools(messages, agent_tool_schemas)
+                    else:
+                        # No tools - just generate text
+                        text = llm.generate("\n".join(m["content"] for m in messages))
+                        agent_result = text or "Error: No response"
                         break
 
-                    log(node_id, agent.id, "llm_decision", result[:500])
+                    if not response_msg:
+                        agent_result = "Error: No response from LLM"
+                        break
 
-                    # Scan for tool call JSON anywhere in the response
-                    # Strip markdown code fences first
-                    clean_result = result
-                    import re as _re
-                    clean_result = _re.sub(r"```(?:json)?", "", clean_result).replace("```", "")
+                    log(node_id, agent.id, "llm_decision", str(response_msg)[:500])
 
-                    tool_call = None
-                    try:
-                        for match_start in [i for i, c in enumerate(clean_result) if c == '{']:
-                            depth = 0
-                            for i, ch in enumerate(clean_result[match_start:]):
-                                if ch == '{':
-                                    depth += 1
-                                elif ch == '}':
-                                    depth -= 1
-                                    if depth == 0:
-                                        candidate = clean_result[match_start:match_start + i + 1]
-                                        try:
-                                            parsed = json.loads(candidate)
-                                            action = parsed.get("action", "")
-                                            tool_name = parsed.get("tool_name")
+                    # Check if LLM wants to call tools
+                    tool_calls = response_msg.get("tool_calls")
 
-                                            # Format 1: {"action": "tool_call", "tool_name": "web_search", "input": {...}}
-                                            if tool_name and (action == "tool_call" or action in TOOLS):
-                                                tool_call = parsed
-                                                break
+                    if tool_calls:
+                        # Add assistant message with tool calls to conversation
+                        messages.append(response_msg)
 
-                                            # Format 2: {"action": "web_search", "input": {...}} — action IS the tool name
-                                            if not tool_name and action in TOOLS:
-                                                parsed["tool_name"] = action
-                                                parsed["action"] = "tool_call"
-                                                # input may be a string — normalize to dict
-                                                if isinstance(parsed.get("input"), str):
-                                                    parsed["input"] = {"filename": parsed["input"]} if action in ("file_reader", "file_search", "file_lines") else {"query": parsed["input"]}
-                                                tool_call = parsed
-                                                break
-                                        except Exception:
-                                            pass
-                                        break
-                            if tool_call:
-                                break
-                    except Exception:
-                        pass
+                        for tc in tool_calls:
+                            tool_name = tc["function"]["name"]
+                            try:
+                                tool_input = json.loads(tc["function"]["arguments"])
+                            except Exception:
+                                tool_input = {}
 
-                    if tool_call:
-                        tool_name = tool_call.get("tool_name")
-                        tool_input = tool_call.get("input", {})
+                            tool_call_count += 1
+                            log(node_id, agent.id, "tool_call", f"{tool_name} | {tool_input}")
 
-                        # Enforce tool call budget
-                        tool_call_count += 1
-                        if tool_call_count > MAX_TOOL_CALLS:
-                            log(node_id, agent.id, "budget_exceeded", f"Tool call limit ({MAX_TOOL_CALLS}) reached")
-                            agent_result += f"\n[Tool call limit reached. Stopping tool use.]\n"
-                            agent_result = result
-                            break
-
-                        log(node_id, agent.id, "tool_call", f"{tool_name} | {tool_input}")
-
-                        # Enforce allowed_tools
-                        if tool_name not in tool_list:
-                            tool_result = f"Error: Tool '{tool_name}' is not in your allowed tools. Available: {tool_list}"
-                            log(node_id, agent.id, "tool_blocked", tool_result)
-                            agent_result += f"\n\nTool '{tool_name}' result:\n{tool_result}\n"
-                            continue
-
-                        allowed, reason = should_execute_tool(state, tool_name, tool_input)
-                        if not allowed:
-                            tool_result = f"Blocked: {reason}"
-                        else:
-                            tool_fn = TOOLS.get(tool_name)
-                            if not tool_fn:
-                                tool_result = f"Error: Tool '{tool_name}' not found. Available: {tool_list}"
+                            # Enforce allowed tools
+                            if tool_name not in tool_list:
+                                tool_result = f"Error: Tool '{tool_name}' not allowed. Available: {tool_list}"
                             else:
-                                # Hard gate: unsafe tools must run in container
-                                if is_unsafe(tool_name):
-                                    # run_python already spawns its own container internally
-                                    pass  # tool_fn handles sandboxing
-                                # Inject task-based filename if file_writer has no filename
-                                if tool_name == "file_writer" and isinstance(tool_input, dict):
-                                    has_filename = tool_input.get("filename") or tool_input.get("file_name") or tool_input.get("file") or tool_input.get("name")
-                                    if not has_filename:
-                                        import re as _re2
-                                        safe = _re2.sub(r'[^a-z0-9]+', '_', task.name.lower()).strip('_')
-                                        tool_input["filename"] = f"{safe}.md"
-                                try:
-                                    tool_result = tool_fn(tool_input)
-                                    if tool_name == "file_writer" and "successfully" in str(tool_result):
-                                        has_written_file = True
-                                except Exception as e:
-                                    tool_result = f"Tool execution failed: {str(e)}"
-                            state["tool_history"].append({
-                                "tool": tool_name,
-                                "input": tool_input,
-                                "result": str(tool_result)[:200]
+                                allowed, reason = should_execute_tool(state, tool_name, tool_input)
+                                if not allowed:
+                                    tool_result = f"Blocked: {reason}"
+                                else:
+                                    # Auto-fill filename for file_writer if missing
+                                    if tool_name == "file_writer" and isinstance(tool_input, dict):
+                                        if not tool_input.get("filename"):
+                                            import re as _re2
+                                            safe = _re2.sub(r'[^a-z0-9]+', '_', task.name.lower()).strip('_')
+                                            tool_input["filename"] = f"{safe}.txt"
+                                    try:
+                                        tool_fn = TOOLS.get(tool_name)
+                                        tool_result = tool_fn(tool_input) if tool_fn else f"Tool '{tool_name}' not found"
+                                        if tool_name == "file_writer" and "successfully" in str(tool_result):
+                                            has_written_file = True
+                                    except Exception as e:
+                                        tool_result = f"Tool execution failed: {str(e)}"
+
+                                state["tool_history"].append({"tool": tool_name, "input": tool_input})
+
+                            log(node_id, agent.id, "tool_result", str(tool_result)[:500])
+                            agent_result += f"\nTool '{tool_name}' result:\n{tool_result}\n"
+
+                            # Add tool result to conversation
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": str(tool_result)
                             })
 
-                        log(node_id, agent.id, "tool_result", str(tool_result)[:500])
-                        # Cap tool result to 3000 chars to avoid 413 payload errors
-                        tool_result_capped = str(tool_result)[:3000] + ("\n...[truncated for length]" if len(str(tool_result)) > 3000 else "")
-                        agent_result += f"\n\nTool '{tool_name}' result:\n<external_data>\n{tool_result_capped}\n</external_data>\n"
+                        # Continue loop to get next LLM response
                         continue
 
-                    agent_result = result
-                    break
+                    else:
+                        # No tool calls - this is the final answer
+                        agent_result = response_msg.get("content") or agent_result
+                        break
 
                 if iteration >= max_iterations:
                     agent_result = f"Max iterations reached. Last result: {agent_result}"

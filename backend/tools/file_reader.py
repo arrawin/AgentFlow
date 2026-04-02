@@ -7,7 +7,6 @@ _INJECTION_PATTERNS = [
 ]
 
 def _sanitize_content(content: str) -> str:
-    """Warn if file content looks like a prompt injection attempt."""
     lower = content.lower()
     for pattern in _INJECTION_PATTERNS:
         if pattern in lower:
@@ -28,8 +27,45 @@ def file_reader(input_data) -> str:
 
     try:
         path = safe_path(filename)
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()[:5000]
+
+        # Auto-detect PDF and extract text properly
+        if path.lower().endswith(".pdf"):
+            return _read_pdf(path, filename)
+
+        # Plain text files
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()[:10000]
         return _sanitize_content(content)
+
     except Exception as e:
         return f"Error: {str(e)}"
+
+
+def _read_pdf(path: str, filename: str) -> str:
+    text = ""
+
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(path)
+        for i, page in enumerate(reader.pages):
+            page_text = page.extract_text() or ""
+            text += f"\n--- Page {i + 1} ---\n{page_text}"
+        if text.strip():
+            content = text[:20000] + ("\n...[truncated]" if len(text) > 20000 else "")
+            return f"<external_data source='pdf:{filename}'>\n{_sanitize_content(content)}\n</external_data>"
+    except ImportError:
+        pass
+
+    try:
+        import pdfplumber
+        with pdfplumber.open(path) as pdf:
+            for i, page in enumerate(pdf.pages):
+                page_text = page.extract_text() or ""
+                text += f"\n--- Page {i + 1} ---\n{page_text}"
+        if text.strip():
+            content = text[:20000] + ("\n...[truncated]" if len(text) > 20000 else "")
+            return f"<external_data source='pdf:{filename}'>\n{_sanitize_content(content)}\n</external_data>"
+    except ImportError:
+        pass
+
+    return "Error: No PDF library available. Install pypdf or pdfplumber."

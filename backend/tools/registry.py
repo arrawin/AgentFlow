@@ -15,6 +15,80 @@ TOOLS = {
     "run_python":  run_python,
 }
 
+# OpenAI-compatible function schemas for native tool calling
+TOOL_SCHEMAS = {
+    "web_search": {
+        "name": "web_search",
+        "description": "Search the web for current information using Tavily. Use this to find real-time data, news, schedules, prices, etc.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query"}
+            },
+            "required": ["query"]
+        }
+    },
+    "file_reader": {
+        "name": "file_reader",
+        "description": "Read the full content of an uploaded file. Supports plain text files (.txt, .md, .csv, etc.) and PDF files (.pdf) — PDF text is automatically extracted.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string", "description": "Name of the file to read (e.g. report.pdf or data.txt)"}
+            },
+            "required": ["filename"]
+        }
+    },
+    "file_search": {
+        "name": "file_search",
+        "description": "Search for lines matching a query within an uploaded file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string", "description": "Name of the file to search"},
+                "query": {"type": "string", "description": "Text to search for"}
+            },
+            "required": ["filename", "query"]
+        }
+    },
+    "file_lines": {
+        "name": "file_lines",
+        "description": "Read specific line ranges from an uploaded file.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string", "description": "Name of the file"},
+                "start": {"type": "integer", "description": "Start line number"},
+                "end": {"type": "integer", "description": "End line number"}
+            },
+            "required": ["filename"]
+        }
+    },
+    "file_writer": {
+        "name": "file_writer",
+        "description": "Write content to a file in the uploads directory. Use this to save output, reports, schedules, etc.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "filename": {"type": "string", "description": "Name of the output file (e.g. schedule.txt)"},
+                "content": {"type": "string", "description": "Full text content to write to the file"}
+            },
+            "required": ["filename", "content"]
+        }
+    },
+    "run_python": {
+        "name": "run_python",
+        "description": "Execute Python code in a sandboxed environment and return the output.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "code": {"type": "string", "description": "Python code to execute"}
+            },
+            "required": ["code"]
+        }
+    },
+}
+
 # Per-tool metadata — input format + mandatory usage rule
 # The executor injects these dynamically based on which tools the agent has access to
 TOOL_METADATA = {
