@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import api from "../api/client";
+import CustomSelect from "../components/CustomSelect";
 
 export default function CreateAgent() {
   const navigate = useNavigate();
@@ -58,7 +59,10 @@ export default function CreateAgent() {
       setForm(f => ({ ...f, domain_id: String(domainSuggestion.domain_id) }));
     } else {
       try {
-        const res = await api.post("/domains", { name: domainSuggestion.domain });
+        const res = await api.post("/domains", { 
+          name: domainSuggestion.domain, 
+          description: domainSuggestion.description 
+        });
         setDomains(prev => [...prev, res.data]);
         setForm(f => ({ ...f, domain_id: String(res.data.id) }));
       } catch { }
@@ -96,7 +100,11 @@ export default function CreateAgent() {
     }
   };
 
-  const filteredDomains = domains.filter(d => d.name !== "SYSTEM" && d.name.toLowerCase().includes(domainSearch.toLowerCase()));
+  const filteredDomains = domains.filter(d => {
+    if (d.name === "SYSTEM") return false;
+    const s = domainSearch.toLowerCase();
+    return d.name.toLowerCase().includes(s) || (d.description && d.description.toLowerCase().includes(s));
+  });
   const selectedDomain = domains.find(d => String(d.id) === form.domain_id);
 
   return (
@@ -134,13 +142,16 @@ export default function CreateAgent() {
             {selectedDomain && <div style={s.selectedDomain}>Selected: <strong>{selectedDomain.name}</strong></div>}
           </div>
         </div>
-        <div style={{ ...s.field, marginTop: 16 }}>
+        <div style={{ ...s.field, marginTop: 16, maxWidth: 320 }}>
           <label style={s.label}>LLM CONFIG</label>
-          <select style={{ ...s.input, maxWidth: 320 }} value={form.llm_config_id}
-            onChange={e => setForm(f => ({ ...f, llm_config_id: e.target.value }))}>
-            <option value="">Default (Groq)</option>
-            {llmConfigs.map(c => <option key={c.id} value={c.id}>{c.provider} / {c.model}</option>)}
-          </select>
+          <CustomSelect
+            value={form.llm_config_id}
+            onChange={val => setForm(f => ({ ...f, llm_config_id: val }))}
+            options={[
+              { value: "", label: "Default (Groq)" },
+              ...llmConfigs.map(c => ({ value: String(c.id), label: `${c.provider} / ${c.model}` }))
+            ]}
+          />
         </div>
       </section>
 

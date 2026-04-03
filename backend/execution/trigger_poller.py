@@ -182,12 +182,13 @@ def _check_email_trigger(schedule, db):
             else:
                 body = msg.get_payload(decode=True).decode("utf-8", errors="replace")
 
-            # Write email to uploads so agents can read it
+            # Write email to uploads/emails — separate from inbox to avoid triggering folder_watch
             subject = msg.get("Subject", "email")
             safe_subject = "".join(c if c.isalnum() else "_" for c in subject)[:40]
             filename = f"email_{safe_subject}_{int(datetime.utcnow().timestamp())}.txt"
-            filepath = os.path.join(UPLOAD_DIR, filename)
-            os.makedirs(UPLOAD_DIR, exist_ok=True)
+            email_dir = os.path.join(UPLOAD_DIR, "emails")
+            os.makedirs(email_dir, exist_ok=True)
+            filepath = os.path.join(email_dir, filename)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(f"From: {msg.get('From', '')}\n")
                 f.write(f"Subject: {subject}\n")
@@ -197,7 +198,7 @@ def _check_email_trigger(schedule, db):
             # Mark as read
             mail.store(msg_id, "+FLAGS", "\\Seen")
 
-            _fire_tasks(schedule, db, trigger_context=f"email: {subject}")
+            _fire_tasks(schedule, db, trigger_context=f"email: {subject} | file: emails/{filename}")
 
         mail.logout()
 

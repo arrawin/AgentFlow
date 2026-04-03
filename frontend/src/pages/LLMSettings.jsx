@@ -48,6 +48,13 @@ export default function LLMSettings() {
   const [msg, setMsg] = useState({ text: "", ok: true });
   const [editingId, setEditingId] = useState(null);
   const [editForm, setEditForm] = useState({});
+  const [deletingId, setDeletingId] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const showToast = (text) => {
+    setToast(text);
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const reload = () => api.get("/llm-configs").then(r => setConfigs(r.data));
   useEffect(() => { reload(); }, []);
@@ -59,15 +66,22 @@ export default function LLMSettings() {
       setMsg({ text: "Config saved successfully", ok: true });
       setForm({ model: "", api_key: "", base_url: "", temperature: 0.7, max_tokens: 2048 });
       reload();
+      showToast("Config saved successfully");
     } catch (e) {
       setMsg({ text: e.response?.data?.detail || "Error saving config", ok: false });
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm("Delete this config?")) return;
-    await api.delete(`/llm-configs/${id}`);
-    reload();
+  const handleConfirmDelete = async (id) => {
+    try {
+      await api.delete(`/llm-configs/${id}`);
+      showToast("Config deleted successfully");
+      setDeletingId(null);
+      reload();
+    } catch (e) {
+      showToast(e.response?.data?.detail || "Error deleting config");
+      setDeletingId(null);
+    }
   };
 
   const startEdit = (c) => {
@@ -79,9 +93,10 @@ export default function LLMSettings() {
     try {
       await api.put(`/llm-configs/${id}`, editForm);
       setEditingId(null);
+      showToast("Config updated successfully");
       reload();
     } catch (e) {
-      alert(e.response?.data?.detail || "Error updating config");
+      showToast(e.response?.data?.detail || "Error updating config");
     }
   };
 
@@ -166,8 +181,8 @@ export default function LLMSettings() {
                           <input type="password" value={editForm.api_key} onChange={e => setEditForm({ ...editForm, api_key: e.target.value })} placeholder="sk-..." />
                         </div>
                         <div style={s.field}>
-                          <label style={s.label}>TEMPERATURE: {editForm.temperature}</label>
-                          <input type="range" min="0" max="2" step="0.1" value={editForm.temperature} onChange={e => setEditForm({ ...editForm, temperature: parseFloat(e.target.value) })} />
+                          <label style={s.label}>TEMPERATURE</label>
+                          <input type="number" min="0" max="2" step="0.1" value={editForm.temperature} onChange={e => setEditForm({ ...editForm, temperature: parseFloat(e.target.value) || 0 })} />
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
@@ -183,8 +198,18 @@ export default function LLMSettings() {
                         {c.is_default && <span style={s.defaultTag}>DEFAULT</span>}
                       </div>
                       <div style={s.configMeta}>API Key: sk-••••••••  ·  Temp: {c.temperature}</div>
-                      <button style={s.editBtn} onClick={() => startEdit(c)}>Edit</button>
-                      <button style={s.deleteBtn} onClick={() => handleDelete(c.id)}>Delete</button>
+                      {deletingId === c.id ? (
+                        <>
+                          <span style={{ fontSize: 11, color: "var(--error)", fontWeight: 700, marginRight: 8, marginLeft: 8 }}>Sure?</span>
+                          <button className="btn-primary" style={{ ...s.deleteBtn, padding: "6px 14px", border: "none", color: "#fff", background: "var(--error)" }} onClick={() => handleConfirmDelete(c.id)}>Yes</button>
+                          <button style={s.cancelBtn} onClick={() => setDeletingId(null)}>No</button>
+                        </>
+                      ) : (
+                        <>
+                          <button style={s.editBtn} onClick={() => startEdit(c)}>Edit</button>
+                          <button style={s.deleteBtn} onClick={() => setDeletingId(c.id)}>Delete</button>
+                        </>
+                      )}
                     </>
                   )}
                 </div>
@@ -209,16 +234,15 @@ export default function LLMSettings() {
               <span style={s.advancedTag}>ADVANCED</span>
             </div>
             <div style={s.tuningList}>
-              <div style={s.tuneItem}>
-                <div style={s.tuneLabel}><span>🌡️ Temperature</span><span style={s.tuneVal}>{form.temperature}</span></div>
-                <input type="range" min="0" max="2" step="0.1" value={form.temperature}
-                  onChange={e => setForm({ ...form, temperature: parseFloat(e.target.value) })} style={s.range} />
-                <div style={s.rangeLabels}><span>PRECISE</span><span>CREATIVE</span></div>
+              <div style={s.field}>
+                <label style={s.label}>TEMPERATURE (0-2)</label>
+                <input type="number" min="0" max="2" step="0.1" value={form.temperature}
+                  onChange={e => setForm({ ...form, temperature: parseFloat(e.target.value) || 0 })} />
               </div>
-              <div style={s.tuneItem}>
-                <div style={s.tuneLabel}><span>Max Tokens</span><span style={s.tuneVal}>{form.max_tokens}</span></div>
-                <input type="range" min="512" max="8192" step="512" value={form.max_tokens}
-                  onChange={e => setForm({ ...form, max_tokens: parseInt(e.target.value) })} style={s.range} />
+              <div style={s.field}>
+                <label style={s.label}>MAX TOKENS</label>
+                <input type="number" min="1" step="1" value={form.max_tokens}
+                  onChange={e => setForm({ ...form, max_tokens: parseInt(e.target.value) || 0 })} />
               </div>
             </div>
           </section>
@@ -246,6 +270,12 @@ export default function LLMSettings() {
           </section>
         </div>
       </div>
+
+      {toast && (
+        <div style={s.toast}>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -264,7 +294,7 @@ const s = {
   section: { background: "var(--surface-bright)", borderRadius: 16, padding: 24, boxShadow: "var(--ambient-shadow)" },
   sectionHeader: { fontSize: 11, fontWeight: 800, color: "var(--on-surface-variant)", letterSpacing: "0.1em", marginBottom: 20 },
   providerGrid: { display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 },
-  providerCard: { background: "var(--surface-container-low)", borderRadius: 12, padding: "16px 10px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, border: "2px solid transparent", cursor: "pointer", transition: "all 200ms ease", outline: "none" },
+  providerCard: { background: "var(--surface-container-low)", borderRadius: 12, padding: "16px 10px", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, border: "2px solid transparent", borderColor: "#1a56db00", cursor: "pointer", transition: "all 200ms ease", outline: "none" },
   providerActive: { background: "#fff", borderColor: "#1a56db", boxShadow: "0 4px 12px rgba(26,86,219,0.12)" },
   providerIcon: { width: 40, height: 40, borderRadius: 10, background: "var(--surface-container)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--on-surface)" },
   providerName: { fontSize: 11, fontWeight: 800, textAlign: "center", textTransform: "capitalize" },
@@ -303,4 +333,5 @@ const s = {
   infoLabel: { fontSize: 11, fontWeight: 800, color: "var(--on-surface)", marginBottom: 2 },
   checkList: { display: "flex", flexDirection: "column", gap: 8 },
   checkItem: { fontSize: 11, fontWeight: 700, color: "var(--on-tertiary-container)" },
+  toast: { position: "fixed", bottom: 40, right: 40, background: "var(--surface-bright)", color: "var(--on-surface)", padding: "14px 24px", borderRadius: 8, boxShadow: "var(--shadow-lg)", fontSize: 13, fontWeight: 700, display: "flex", alignItems: "center", gap: 8, zIndex: 999, borderLeft: "4px solid var(--tertiary)", animation: "slideUp 200ms ease" },
 };

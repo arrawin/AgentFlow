@@ -38,7 +38,7 @@ export function DrawerModal({ children, onClose }) {
       }}
       onClick={onClose}
     >
-      <div onClick={e => e.stopPropagation()}>
+      <div onClick={e => e.stopPropagation()} style={{ height: "100%" }}>
         {children}
       </div>
     </div>,

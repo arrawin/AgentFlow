@@ -39,6 +39,10 @@ def create_schedule(payload: ScheduleCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="watch_path required for folder/file watch trigger")
     if payload.trigger_type == "email" and not payload.imap_host:
         raise HTTPException(status_code=400, detail="imap_host required for email trigger")
+    if payload.trigger_type == "email" and not payload.subject_filter:
+        raise HTTPException(status_code=400, detail="subject_filter is required for email trigger")
+    if payload.trigger_type == "email" and not payload.sender_filter:
+        raise HTTPException(status_code=400, detail="sender_filter is required for email trigger")
 
     schedule = _build_schedule(payload)
     db.add(schedule)

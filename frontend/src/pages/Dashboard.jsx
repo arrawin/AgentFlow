@@ -83,24 +83,29 @@ export default function Dashboard() {
             <h2 style={s.sectionTitle}>Latest Activity</h2>
           </div>
           <div style={s.activityCard}>
-            {latestRun ? (
-              <>
-                <div style={s.activityTitle}>{latestRun.task_name || `Task #${latestRun.task_id}`}</div>
-                <div style={s.activityMeta}>
-                  {new Date(latestRun.started_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
-                  <div style={{ marginTop: 6 }}>
-                    <span style={{ ...s.statusPill, background: SC[latestRun.status]?.bg || "#f1f5f9", color: SC[latestRun.status]?.color || "#94a3b8" }}>
-                      {latestRun.status}
-                    </span>
-                  </div>
-                </div>
-                <button style={s.activityBtn} onClick={() => navigate("/runs")}>Open Run History</button>
-              </>
-            ) : (
+            {recentRuns.length === 0 ? (
               <>
                 <div style={s.activityTitle}>No runs yet</div>
                 <div style={s.activityMeta}>Create a task and run it to see activity here.</div>
                 <button style={s.activityBtn} onClick={() => navigate("/tasks")}>Create a Task</button>
+              </>
+            ) : (
+              <>
+                {recentRuns.slice(0, 3).map((run, i) => {
+                  const sc = SC[run.status] || SC.not_started;
+                  // Remove border from the very last item if there's no button, 
+                  // but here we always have a button so it looks better with a separator.
+                  return (
+                    <div key={run.id} style={s.activityItem}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div style={s.activityTitle}>{run.task_name || `Task #${run.task_id}`}</div>
+                        <span style={{ ...s.statusPill, background: sc.bg, color: sc.color, fontSize: 10 }}>{run.status}</span>
+                      </div>
+                      <div style={s.activityMeta}>{new Date(run.started_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}</div>
+                    </div>
+                  );
+                })}
+                <button style={s.activityBtn} onClick={() => navigate("/runs")}>Open Run History</button>
               </>
             )}
           </div>
@@ -129,7 +134,18 @@ export default function Dashboard() {
                 <tr key={run.id} style={s.tr}>
                   <td style={s.tdMono}>#{run.id}</td>
                   <td style={s.tdName}>{run.task_name || `Task #${run.task_id}`}</td>
-                  <td style={s.tdMeta}>{run.triggered_by === "scheduler" ? "Scheduled" : "Manual"}</td>
+                  <td style={s.tdMeta}>{
+                    (() => {
+                      const tb = run.triggered_by;
+                      if (!tb || tb === "manual") return "Manual";
+                      if (tb === "scheduler") return "Scheduled (Cron)";
+                      if (tb.startsWith("trigger:")) {
+                        const type = tb.split(":")[1];
+                        return type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') + " Event";
+                      }
+                      return tb;
+                    })()
+                  }</td>
                   <td style={s.tdMeta}>{new Date(run.started_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</td>
                   <td><span style={{ ...s.statusPill, background: sc.bg, color: sc.color }}>{run.status}</span></td>
                 </tr>
@@ -166,21 +182,22 @@ const s = {
   miniStat: { borderRadius: 16, padding: "16px 20px" },
   miniStatLabel: { fontSize: 11, fontWeight: 700, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" },
   miniStatValue: { fontSize: 22, fontWeight: 800, fontFamily: "Manrope" },
-  midSection: { display: "grid", gridTemplateColumns: "1fr 320px", gap: 40, marginBottom: 48 },
+  midSection: { display: "grid", gridTemplateColumns: "2fr 1fr", gap: 32, marginBottom: 48, alignItems: "stretch" },
   sectionHeader: { marginBottom: 24 },
   sectionLabel: { fontSize: 11, fontWeight: 800, color: "var(--on-surface-variant)", letterSpacing: "0.15em", marginBottom: 12, textTransform: "uppercase" },
   sectionTitle: { fontSize: 24, fontWeight: 800, color: "var(--on-surface)", margin: 0, fontFamily: "Manrope" },
   guideSection: { display: "flex", flexDirection: "column" },
   guideGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 },
-  guideCard: { background: "var(--surface-bright)", borderRadius: 16, padding: 24, boxShadow: "var(--ambient-shadow)", cursor: "pointer", transition: "all 200ms ease", display: "flex", alignItems: "flex-start", gap: 18, border: "1px solid transparent" },
+  guideCard: { background: "var(--surface-bright)", borderRadius: 16, padding: 24, boxShadow: "var(--ambient-shadow)", cursor: "pointer", transition: "all 200ms ease", display: "flex", alignItems: "flex-start", gap: 18, border: "1px solid transparent", height: "100%" },
   guideIcon: { width: 48, height: 48, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
   guideCardTitle: { fontSize: 18, fontWeight: 800, marginBottom: 6, fontFamily: "Manrope" },
   guideCardDesc: { fontSize: 13, color: "var(--on-surface-variant)", lineHeight: 1.5 },
-  activitySection: { display: "flex", flexDirection: "column", marginTop: 12 },
-  activityCard: { background: "var(--surface-bright)", borderRadius: 16, padding: 28, boxShadow: "var(--ambient-shadow)", display: "flex", flexDirection: "column", gap: 16, borderTop: "4px solid #4f46e5" },
-  activityTitle: { fontSize: 20, fontWeight: 800, color: "var(--on-surface)", fontFamily: "Manrope" },
-  activityMeta: { fontSize: 14, color: "var(--on-surface-variant)", lineHeight: 1.5 },
-  activityBtn: { alignSelf: "flex-start", marginTop: 8, background: "var(--primary)", border: "none", borderRadius: 10, padding: "10px 20px", fontSize: 14, fontWeight: 700, color: "#fff", cursor: "pointer", transition: "opacity 150ms" },
+  activitySection: { display: "flex", flexDirection: "column" },
+  activityCard: { background: "var(--surface-bright)", borderRadius: 16, padding: "28px 24px", boxShadow: "var(--ambient-shadow)", display: "flex", flexDirection: "column", height: "100%" },
+  activityItem: { display: "flex", flexDirection: "column", paddingBottom: 14, marginBottom: 14, borderBottom: "1px solid #f1f5f9" },
+  activityTitle: { fontSize: 14, fontWeight: 700, color: "var(--on-surface)", fontFamily: "Manrope" },
+  activityMeta: { fontSize: 12, color: "var(--on-surface-variant)", marginTop: 2 },
+  activityBtn: { alignSelf: "stretch", textAlign: "center", marginTop: "auto", background: "var(--surface-container-low)", border: "1px solid var(--outline)", borderRadius: 10, padding: "10px 20px", fontSize: 13, fontWeight: 700, color: "var(--on-surface)", cursor: "pointer", transition: "all 150ms" },
   tableSection: { background: "var(--surface-bright)", borderRadius: 20, boxShadow: "var(--ambient-shadow)", overflow: "hidden", padding: "4px" },
   tableHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", padding: "32px 32px 24px" },
   viewAllBtn: { fontSize: 14, fontWeight: 700, color: "#4f46e5", background: "transparent", border: "none", cursor: "pointer", padding: "8px 0" },

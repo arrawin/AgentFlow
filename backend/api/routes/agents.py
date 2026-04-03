@@ -72,37 +72,49 @@ def suggest_domain(req: SuggestDomainRequest, db: Session = Depends(get_db)):
     from services.llm_service import LLMService
     from db.models import LLMConfig, Domain
 
-    existing = [d.name for d in db.query(Domain).filter(Domain.name != "SYSTEM").all()]
+    all_domains = db.query(Domain).filter(Domain.name != "SYSTEM").all()
+    existing_text = "\n".join([
+        f"- {d.name}: {d.description}" if d.description else f"- {d.name}"
+        for d in all_domains
+    ]) or "None yet"
 
     llm_config = db.query(LLMConfig).filter(LLMConfig.is_default == True).first()
     llm = LLMService(llm_config=llm_config)
 
     prompt = f"""Given this agent skill/system prompt, suggest the most appropriate domain category.
-
-Skill content:
-{req.skill_content[:500]}
-
-Existing domains: {existing if existing else "None yet"}
-
-Rules:
-- If one of the existing domains fits well, return that exact name
-- If none fit, suggest a short new domain name (1-2 words, e.g. "Research", "Content", "Data Analysis")
-- Return ONLY the domain name, nothing else
-
-Domain:"""
+ 
+ Skill content:
+ {req.skill_content[:500]}
+ 
+ Existing domains (name: description):
+ {existing_text}
+ 
+ Rules:
+ - If one of the existing domains fits well based on its name and description, return that exact name.
+ - If none fit, suggest a short new domain name (1-2 words).
+ - If suggesting a NEW domain, also provide a short 1-sentence description for it.
+ - Return ONLY a JSON object: {{"domain": "Name", "description": "Short description if new"}}
+ 
+ JSON:"""
 
     result = llm.generate(prompt)
     if not result:
-        return {"domain": "General", "is_new": True}
+        return {"domain": "General", "description": "Default pool for agents.", "is_new": True}
 
-    suggested = result.strip().strip('"').strip("'").split("\n")[0].strip()
+    try:
+        clean = re.sub(r"```(?:json)?|```", "", result).strip()
+        data = json.loads(clean)
+        suggested = data.get("domain", "General").strip()
+        description = data.get("description", "").strip()
+    except:
+        suggested = result.strip().split("\n")[0].strip()
+        description = ""
 
-    # Check if it matches an existing domain (case-insensitive)
-    for d in db.query(Domain).filter(Domain.name != "SYSTEM").all():
+    for d in all_domains:
         if d.name.lower() == suggested.lower():
             return {"domain": d.name, "domain_id": d.id, "is_new": False}
 
-    return {"domain": suggested, "is_new": True}
+    return {"domain": suggested, "description": description, "is_new": True}
 
 
 class AgentDryRunRequest(PydanticBase):

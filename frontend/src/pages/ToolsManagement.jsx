@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import api from "../api/client";
+import CustomSelect from "../components/CustomSelect";
+import { DrawerModal } from "../components/Modal";
+import { buildDomainColorMap, getAgentColor } from "../utils/colors";
 
 const TOOL_INFO = {
   web_search:  { label: "Web Search",  desc: "Search the internet via Tavily API",        color: "#059669", bg: "#d1fae5", group: "Network"     },
@@ -16,7 +19,6 @@ const TOOL_GROUPS = {
   "CODE":        { color: "#7c3aed", tools: ["run_python"] },
 };
 
-const AVATAR_COLORS = ["#ea6c00", "#1a56db", "#059669", "#7c3aed", "#0891b2", "#dc2626"];
 
 function getInitials(name) {
   return name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
@@ -24,6 +26,7 @@ function getInitials(name) {
 
 export default function ToolsManagement() {
   const [agents, setAgents] = useState([]);
+  const [domains, setDomains] = useState([]);
   const [tools, setTools] = useState([]);
   const [permissions, setPermissions] = useState({});
   const [saving, setSaving] = useState(null);
@@ -31,18 +34,21 @@ export default function ToolsManagement() {
   const [toast, setToast] = useState(null);
   const [agentSearch, setAgentSearch] = useState("");
   const [toolFilter, setToolFilter] = useState("");
+  const [domainFilter, setDomainFilter] = useState("");
   const [page, setPage] = useState(1);
   const [collapsedGroups, setCollapsedGroups] = useState({});
+  const [selectedAgentId, setSelectedAgentId] = useState(null);
   const PAGE_SIZE = 8;
 
   const toggleGroup = (group) => setCollapsedGroups(prev => ({ ...prev, [group]: !prev[group] }));
 
   useEffect(() => {
-    Promise.all([api.get("/agents"), api.get("/tools")])
-      .then(([ar, tr]) => {
+    Promise.all([api.get("/agents"), api.get("/tools"), api.get("/domains")])
+      .then(([ar, tr, dr]) => {
         const nonSystem = ar.data.filter(a => !a.is_system);
         setAgents(nonSystem);
         setTools(tr.data);
+        setDomains(dr.data.filter(d => d.name !== "SYSTEM"));
         const perms = {};
         nonSystem.forEach(a => { perms[a.id] = new Set(a.allowed_tools || []); });
         setPermissions(perms);
@@ -96,7 +102,10 @@ export default function ToolsManagement() {
     }
   };
 
-  const filteredAgents = agents.filter(a => a.name.toLowerCase().includes(agentSearch.toLowerCase()));
+  const filteredAgents = agents.filter(a =>
+    a.name.toLowerCase().includes(agentSearch.toLowerCase()) &&
+    (!domainFilter || String(a.domain_id) === domainFilter)
+  );
   const totalPages = Math.ceil(filteredAgents.length / PAGE_SIZE);
   const pagedAgents = filteredAgents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const allToolKeys = Object.values(TOOL_GROUPS).flatMap(g => g.tools);
@@ -104,6 +113,8 @@ export default function ToolsManagement() {
     ...allToolKeys.filter(k => tools.find(t => t.key === k)),
     ...tools.map(t => t.key).filter(k => !allToolKeys.includes(k)),
   ].filter(k => !toolFilter || (TOOL_INFO[k]?.label || k).toLowerCase().includes(toolFilter.toLowerCase()));
+
+  const domainColorMap = buildDomainColorMap(domains);
 
   return (
     <div className="animate-up" style={s.page}>
@@ -151,6 +162,16 @@ export default function ToolsManagement() {
           <div style={{ display: "flex", gap: 12, flex: 1 }}>
             <input placeholder="Find agent..." value={agentSearch} onChange={e => { setAgentSearch(e.target.value); setPage(1); }} style={s.searchInput} />
             <input placeholder="Filter tools..." value={toolFilter} onChange={e => setToolFilter(e.target.value)} style={s.searchInput} />
+            <div style={{ width: 160 }}>
+              <CustomSelect
+                value={domainFilter}
+                onChange={val => { setDomainFilter(val); setPage(1); }}
+                options={[
+                  { value: "", label: "All Domains" },
+                  ...domains.map(d => ({ value: String(d.id), label: d.name }))
+                ]}
+              />
+            </div>
           </div>
           <button
             style={{ background: "#1a56db", color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
@@ -206,17 +227,22 @@ export default function ToolsManagement() {
                   {agents.length === 0 ? "No agents yet." : "No agents match your search."}
                 </td></tr>
               ) : pagedAgents.map((agent, idx) => {
-                const color = AVATAR_COLORS[((page - 1) * PAGE_SIZE + idx) % AVATAR_COLORS.length];
+                const color = getAgentColor(agent, domainColorMap);
                 const perms = permissions[agent.id] || new Set();
                 const isSaving = saving === agent.id;
                 const isSaved = saved === agent.id;
                 return (
                   <tr key={agent.id} style={s.tr}>
-                    <td style={{ ...s.agentCell, position: "sticky", left: 0, background: "#fff", zIndex: 1 }}>
+                    <td style={{ ...s.agentCell, position: "sticky", left: 0, background: selectedAgentId === agent.id ? "var(--surface-container-low)" : "#fff", zIndex: 1, cursor: "pointer" }} onClick={() => setSelectedAgentId(agent.id)}>
                       <div style={{ ...s.cellAvatar, background: color + "18", color }}>{getInitials(agent.name)}</div>
                       <div>
                         <div style={s.cellName}>{agent.name}</div>
-                        <div style={s.cellCount}>{perms.size} tool{perms.size !== 1 ? "s" : ""} enabled</div>
+                        <div style={s.cellMeta}>
+                          {domains.find(d => d.id === agent.domain_id)?.name && (
+                            <span style={s.domainTag}>{domains.find(d => d.id === agent.domain_id).name}</span>
+                          )}
+                          <span style={s.cellCount}>{perms.size} tool{perms.size !== 1 ? "s" : ""}</span>
+                        </div>
                       </div>
                     </td>
                     {Object.entries(TOOL_GROUPS).map(([group, meta]) => {
@@ -281,14 +307,26 @@ export default function ToolsManagement() {
           {toast.ok ? "✓" : "✗"} {toast.msg}
         </div>
       )}
+
+      {selectedAgentId && agents.find(a => a.id === selectedAgentId) && (
+        <DrawerModal onClose={() => setSelectedAgentId(null)}>
+          <AgentDetailsDrawer 
+            agent={agents.find(a => a.id === selectedAgentId)}
+            domain={domains.find(d => d.id === agents.find(a => a.id === selectedAgentId).domain_id)}
+            permissions={permissions[selectedAgentId] || new Set()}
+            onClose={() => setSelectedAgentId(null)}
+            color={getAgentColor(agents.find(a => a.id === selectedAgentId), domainColorMap)}
+          />
+        </DrawerModal>
+      )}
     </div>
   );
 }
 
-function ToolIcon({ toolKey }) {
+function ToolIcon({ toolKey, size = 18 }) {
   if (toolKey === "web_search") {
     return (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <circle cx="12" cy="12" r="10"/>
         <line x1="2" y1="12" x2="22" y2="12"/>
         <path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/>
@@ -297,14 +335,14 @@ function ToolIcon({ toolKey }) {
   }
   if (toolKey === "file_writer") {
     return (
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 20h9"/>
         <path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>
       </svg>
     );
   }
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
     </svg>
   );
@@ -315,7 +353,7 @@ function FileUploadSection() {
   const [folders, setFolders] = useState({});
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState(null);
-  const [activeTab, setActiveTab] = useState("files"); // "files" | "inbox"
+  const [activeTab, setActiveTab] = useState("files"); // "files" | "inbox" | "emails"
 
   const fetchFiles = () => api.get("/files").then(r => {
     setFiles(r.data.files || []);
@@ -364,6 +402,7 @@ function FileUploadSection() {
   );
 
   const inboxFiles = folders["inbox"] || [];
+  const emailFiles = folders["emails"] || [];
 
   return (
     <div style={s.uploadCard}>
@@ -372,6 +411,7 @@ function FileUploadSection() {
         {[
           { key: "files", label: "Files" },
           { key: "inbox", label: "Inbox", badge: inboxFiles.length > 0 ? inboxFiles.length : null },
+          { key: "emails", label: "Emails", badge: emailFiles.length > 0 ? emailFiles.length : null },
         ].map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
             padding: "8px 16px", fontSize: 12, fontWeight: 700, border: "none", background: "transparent",
@@ -422,6 +462,20 @@ function FileUploadSection() {
           </div>
         </>
       )}
+
+      {activeTab === "emails" && (
+        <>
+          <div style={{ marginBottom: 10 }}>
+            <p style={{ fontSize: 12, color: "var(--on-surface-variant)" }}>Emails received by the email trigger. Read-only — managed by the system.</p>
+          </div>
+          <div style={s.fileList}>
+            {emailFiles.length === 0
+              ? <div style={{ fontSize: 12, color: "var(--on-surface-variant)" }}>No emails received yet. Set up an email trigger in the Scheduler to start receiving emails.</div>
+              : emailFiles.map(f => <FileRow key={f} f={f} subfolder="emails" />)
+            }
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -448,6 +502,51 @@ function DeleteButton({ onDelete }) {
       style={{ background: "transparent", border: "none", color: "var(--on-surface-variant)", cursor: "pointer", fontSize: 13, opacity: 0.6 }}
       onClick={() => setConfirming(true)}
     >{"✕"}</button>
+  );
+}
+
+function AgentDetailsDrawer({ agent, domain, permissions, onClose, color }) {
+  const enabledTools = Array.from(permissions);
+  return (
+    <div className="animate-slide-left" style={{ width: 340, height: "100%", boxSizing: "border-box", background: "#fff", borderLeft: "1px solid var(--outline)", boxShadow: "-4px 0 24px rgba(15,23,42,0.1)", padding: "32px 24px", display: "flex", flexDirection: "column" }}>
+       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 32 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ width: 34, height: 34, borderRadius: 9, background: color + "18", color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800 }}>
+              {getInitials(agent.name)}
+            </div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "var(--on-surface)" }}>{agent.name}</div>
+              <div style={{ fontSize: 10, color: "var(--on-surface-variant)" }}>{domain ? domain.name : "Agent"}</div>
+            </div>
+          </div>
+          <button style={{ background: "transparent", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 16 }} onClick={onClose}>✕</button>
+       </div>
+       
+       <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.06em", color: "var(--on-surface-variant)", marginBottom: 16, borderBottom: "1px solid var(--outline)", paddingBottom: 8 }}>
+         ENABLED TOOLS ({enabledTools.length})
+       </div>
+       
+       <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, overflowY: "auto", paddingRight: 8 }}>
+         {enabledTools.length === 0 ? (
+           <div style={{ fontSize: 13, color: "#94a3b8", fontStyle: "italic", textAlign: "center", padding: 32 }}>No tools currently assigned.<br/><br/>Toggle them in the matrix to give the agent capabilities.</div>
+         ) : (
+           enabledTools.map(tk => {
+             const info = TOOL_INFO[tk] || { label: tk, color: "#64748b", bg: "#f1f5f9", desc: "No description available", group: "Custom" };
+             return (
+               <div key={tk} style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px", borderRadius: 10, background: "var(--surface-container-low)", border: "1px solid var(--outline)" }}>
+                 <div style={{ width: 32, height: 32, borderRadius: 8, background: info.bg, color: info.color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <ToolIcon toolKey={tk} size={18} />
+                 </div>
+                 <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 800, color: "var(--on-surface)" }}>{info.label}</div>
+                    <div style={{ fontSize: 11, color: "var(--on-surface-variant)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{info.desc}</div>
+                 </div>
+               </div>
+             );
+           })
+         )}
+       </div>
+    </div>
   );
 }
 
@@ -496,7 +595,9 @@ const s = {
   agentCell:    { display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderRight: "1px solid var(--outline)", minWidth: 240 },
   cellAvatar:   { width: 34, height: 34, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, flexShrink: 0 },
   cellName:     { fontSize: 13, fontWeight: 700, color: "var(--on-surface)" },
-  cellCount:    { fontSize: 10, color: "var(--on-surface-variant)", marginTop: 1 },
+  cellMeta:     { display: "flex", alignItems: "center", gap: 6, marginTop: 2 },
+  domainTag:    { fontSize: 9, fontWeight: 800, background: "#f1f5f9", color: "#64748b", padding: "1px 6px", borderRadius: 10, letterSpacing: "0.04em" },
+  cellCount:    { fontSize: 10, color: "var(--on-surface-variant)" },
   permCell:     { textAlign: "center", padding: "14px 16px", borderLeft: "1px solid var(--outline)" },
   toggleBtn:    { background: "none", border: "none", cursor: "pointer", padding: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 6 },
   saveBtn:      { color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", transition: "background 300ms", whiteSpace: "nowrap", background: "#059669" },

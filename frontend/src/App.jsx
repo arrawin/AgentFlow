@@ -17,6 +17,7 @@ window.setModalOpen = (open) => {
   window.__modalOpen = open;
   const el = document.getElementById("app-root");
   if (el) el.classList.toggle("app-blur", open);
+  document.body.style.overflow = open ? "hidden" : "";
 };
 
 import WorkflowCanvas from "./pages/WorkflowCanvas";

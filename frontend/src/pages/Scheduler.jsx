@@ -3,6 +3,7 @@ import api from "../api/client";
 import { getSchedules, createSchedule, updateSchedule, deleteSchedule } from "../api/schedules";
 import { getTasks } from "../api/tasks";
 import Modal from "../components/Modal";
+import CustomSelect from "../components/CustomSelect";
 
 const CRON_PRESETS = [
   { label: "Every day at 9 AM",     value: "0 9 * * *" },
@@ -87,6 +88,8 @@ export default function Scheduler() {
     if (form.trigger_type === "cron" && !form.cron_expression.trim()) { setError("Cron expression is required"); return; }
     if ((form.trigger_type === "folder_watch" || form.trigger_type === "file_watch") && !form.watch_path.trim()) { setError("Watch path is required"); return; }
     if (form.trigger_type === "email" && !form.imap_host.trim()) { setError("IMAP host is required"); return; }
+    if (form.trigger_type === "email" && !form.subject_filter.trim()) { setError("Subject filter is required for email triggers"); return; }
+    if (form.trigger_type === "email" && !form.sender_filter.trim()) { setError("Sender filter is required for email triggers"); return; }
     setSaving(true); setError("");
     try {
       if (editId) { await updateSchedule(editId, form); showToast("Schedule updated"); }
@@ -152,7 +155,6 @@ export default function Scheduler() {
           <p style={s.pageSub}>Orchestrate your autonomous workforce. Manage recurring triggers and monitor execution in real-time.</p>
         </div>
         <div style={s.headerActions}>
-          <button style={s.exportBtn}>↑ Export Logs</button>
           <button className="btn-primary" style={s.newBtn} onClick={openCreate}>+ New Schedule</button>
         </div>
       </div>
@@ -325,9 +327,19 @@ export default function Scheduler() {
             {form.trigger_type === "cron" && (
               <div style={s.field}>
                 <label style={s.label}>FREQUENCY</label>
-                <select style={s.input} value={customCron ? "" : form.cron_expression} onChange={e => { if (e.target.value === "") { setCustomCron(true); setForm(f => ({ ...f, cron_expression: "" })); } else { setCustomCron(false); setForm(f => ({ ...f, cron_expression: e.target.value })); } }}>
-                  {CRON_PRESETS.map(p => <option key={p.label} value={p.value}>{p.label}</option>)}
-                </select>
+                <CustomSelect
+                  value={customCron ? "" : form.cron_expression}
+                  onChange={val => {
+                    if (val === "") {
+                      setCustomCron(true);
+                       setForm(f => ({ ...f, cron_expression: "" }));
+                    } else {
+                      setCustomCron(false);
+                      setForm(f => ({ ...f, cron_expression: val }));
+                    }
+                  }}
+                  options={CRON_PRESETS}
+                />
                 {customCron && <input style={{ ...s.input, marginTop: 8, fontFamily: "monospace" }} placeholder="e.g. 0 9 * * 1-5" value={form.cron_expression} onChange={e => setForm(f => ({ ...f, cron_expression: e.target.value }))} />}
                 {form.cron_expression && <div style={s.cronPreview}>{cronHuman(form.cron_expression)}</div>}
               </div>
@@ -387,16 +399,17 @@ export default function Scheduler() {
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <div style={s.field}>
-                    <label style={s.label}>SUBJECT FILTER (optional)</label>
-                    <input style={s.input} placeholder="New Report" value={form.subject_filter}
+                    <label style={s.label}>SUBJECT FILTER <span style={{ color: "#dc2626" }}>*</span></label>
+                    <input style={s.input} placeholder="e.g. New Report" value={form.subject_filter}
                       onChange={e => setForm(f => ({ ...f, subject_filter: e.target.value }))} />
                   </div>
                   <div style={s.field}>
-                    <label style={s.label}>SENDER FILTER (optional)</label>
-                    <input style={s.input} placeholder="boss@company.com" value={form.sender_filter}
+                    <label style={s.label}>SENDER FILTER <span style={{ color: "#dc2626" }}>*</span></label>
+                    <input style={s.input} placeholder="e.g. boss@company.com" value={form.sender_filter}
                       onChange={e => setForm(f => ({ ...f, sender_filter: e.target.value }))} />
                   </div>
                 </div>
+                <div style={s.hint}>Both filters are required to prevent triggering on unintended emails.</div>
               </>
             )}
             <div style={s.field}>

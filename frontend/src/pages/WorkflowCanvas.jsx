@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api from "../api/client";
 import {
@@ -22,7 +22,7 @@ const getColor = (i) => COLORS[i % COLORS.length];
 function StartNode({ data }) {
   return (
     <div style={{ ...ns.startNode, ...(data.running ? ns.startNodeRunning : {}) }} onClick={data.onStart}>
-      <div style={ns.startRing}><span style={{ fontSize: 16, color: "#6366f1" }}>▶</span></div>
+      <div style={ns.startRing}><span style={{ fontSize: 16, color: "#1a56db" }}>▶</span></div>
       <div style={ns.startLabel}>START</div>
       <div style={ns.startHint}>{data.running ? "Running..." : "Click to execute"}</div>
       <Handle type="source" position={Position.Bottom} style={ns.handle} />
@@ -41,7 +41,7 @@ function EndNode() {
 
 function AgentNode({ data }) {
   const color = data.color || "#6366f1";
-  const statusColor = { idle: "#cbd5e1", running: "#6366f1", completed: "#22c55e", failed: "#ef4444" }[data.status || "idle"];
+  const statusColor = { idle: "#cbd5e1", running: "#ea6c00", completed: "#1a56db", failed: "#ef4444" }[data.status || "idle"];
   const isRunning = data.status === "running";
 
   return (
@@ -63,8 +63,13 @@ function AgentNode({ data }) {
       {data.skills && <div style={ns.agentSkill}>{data.skills.slice(0, 70)}...</div>}
       <div style={ns.agentFooter}>
         <span style={ns.stepTag}>STEP {String(data.index + 1).padStart(2, "0")}</span>
-        {data.status === "completed" && <span style={{ ...ns.statusTag, background: "#dcfce7", color: "#15803d" }}>✓ Done</span>}
-        {data.status === "running"   && <span style={{ ...ns.statusTag, background: "#ede9fe", color: "#6366f1" }}>● Running</span>}
+        {data.status === "completed" && <span style={{ ...ns.statusTag, background: "#dbeafe", color: "#1a56db" }}>✓ Done</span>}
+        {data.status === "running"   && <span style={{ ...ns.statusTag, background: "#fff0e0", color: "#ea6c00", display: "flex", alignItems: "center", gap: 4 }}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" style={{ animation: "spin-border 1s linear infinite" }}>
+             <path d="M21 12a9 9 0 11-6.219-8.56"/>
+          </svg>
+          Running
+        </span>}
         {data.status === "failed"    && <span style={{ ...ns.statusTag, background: "#fee2e2", color: "#dc2626" }}>✗ Failed</span>}
       </div>
       <Handle type="source" position={Position.Bottom} style={{ ...ns.handle, background: color }} />
@@ -89,7 +94,8 @@ export default function WorkflowCanvas() {
   const [toast, setToast]       = useState(null);
   const [nodeStatuses, setNodeStatuses] = useState({}); // { nodeId: "idle"|"running"|"completed"|"failed" }
   const [runOutputs, setRunOutputs] = useState(null); // { nodes: [...], final_output }
-  const pollRef = useState(null);
+  const [currentRunId, setCurrentRunId] = useState(null);
+  const pollRef = useRef(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -139,8 +145,8 @@ export default function WorkflowCanvas() {
 
     fNodes.push({ id: "end", type: "endNode", position: { x: CX, y: (gNodes.length + 1) * SPACING_Y }, data: {} });
 
-    const edgeStyle = { stroke: "#6366f1", strokeWidth: 2 };
-    const marker = { type: MarkerType.ArrowClosed, color: "#6366f1" };
+    const edgeStyle = { stroke: "#cbd5e1", strokeWidth: 2 };
+    const marker = { type: MarkerType.ArrowClosed, color: "#cbd5e1" };
 
     if (gNodes.length > 0) fEdges.push({ id: "s-n1", source: "start", target: gNodes[0].id, animated: true, style: edgeStyle, markerEnd: marker });
     gEdges.forEach(e => fEdges.push({ id: `${e.from}-${e.to}`, source: e.from, target: e.to, animated: true, style: edgeStyle, markerEnd: marker }));
@@ -242,12 +248,12 @@ export default function WorkflowCanvas() {
     }, 2000);
 
     // Store interval ref for cleanup
-    pollRef[0] = interval;
+    pollRef.current = interval;
   };
 
   // Cleanup on unmount
   useEffect(() => {
-    return () => { if (pollRef[0]) clearInterval(pollRef[0]); };
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
 
   const showToast = (msg, ok) => { setToast({ msg, ok }); setTimeout(() => setToast(null), 3000); };
@@ -294,12 +300,28 @@ export default function WorkflowCanvas() {
           })}
           edges={edges.map(e => {
             const targetStatus = nodeStatuses[e.target];
-            const isActive = targetStatus === "running" || targetStatus === "completed";
+            const sourceStatus = nodeStatuses[e.source];
+            
+            let shouldAnimate = false;
+            let strokeColor = "#cbd5e1";
+            
+            if (targetStatus === "completed" || (e.target === "end" && sourceStatus === "completed")) {
+                strokeColor = "#1a56db"; // Turn blue once completed
+            } else if (targetStatus === "failed") {
+                strokeColor = "#ef4444";
+            }
+            
+            if (running) {
+                if (e.source === "start" && targetStatus !== "completed") { shouldAnimate = true; strokeColor = "#ea6c00"; }
+                else if (targetStatus === "running") { shouldAnimate = true; strokeColor = "#ea6c00"; }
+                else if (e.target === "end" && sourceStatus === "completed" && running) { shouldAnimate = true; strokeColor = "#ea6c00"; }
+            }
+
             return {
               ...e,
-              animated: isActive || running,
-              style: { ...e.style, stroke: targetStatus === "completed" ? "#22c55e" : targetStatus === "failed" ? "#ef4444" : "#6366f1", strokeWidth: isActive ? 3 : 2 },
-              markerEnd: { type: MarkerType.ArrowClosed, color: targetStatus === "completed" ? "#22c55e" : targetStatus === "failed" ? "#ef4444" : "#6366f1" },
+              animated: shouldAnimate,
+              style: { ...e.style, stroke: strokeColor, strokeWidth: shouldAnimate ? 3 : 2 },
+              markerEnd: { type: MarkerType.ArrowClosed, color: strokeColor },
             };
           })}
           onNodesChange={onNodesChange}
@@ -319,8 +341,8 @@ export default function WorkflowCanvas() {
           <Panel position="top-center" style={s.topBar}>
             <div style={s.topTaskName}>{task.name}</div>
             <div style={s.topDivider} />
-            <span style={{ ...s.statusPill, background: running ? "#ede9fe" : "#f1f5f9", color: running ? "#6366f1" : "#64748b" }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: running ? "#6366f1" : "#cbd5e1", display: "inline-block", marginRight: 6 }} />
+            <span style={{ ...s.statusPill, background: running ? "#fff0e0" : "#f1f5f9", color: running ? "#ea6c00" : "#64748b" }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: running ? "#ea6c00" : "#cbd5e1", display: "inline-block", marginRight: 6 }} />
               {running ? "Running" : "Ready"}
             </span>
             <button style={{ ...s.runBtn, ...(running ? { opacity: 0.6, cursor: "not-allowed" } : {}) }} onClick={handleRun} disabled={running}>
@@ -379,10 +401,10 @@ export default function WorkflowCanvas() {
 
 const ns = {
   handle: { width: 10, height: 10, border: "2px solid #f8fafc" },
-  startNode: { background: "#fff", border: "2px solid #6366f1", borderRadius: 16, padding: "20px 28px", textAlign: "center", cursor: "pointer", minWidth: 160, boxShadow: "0 0 0 4px rgba(99,102,241,0.08)", transition: "all 200ms" },
-  startNodeRunning: { background: "#f5f3ff", boxShadow: "0 0 0 4px rgba(99,102,241,0.2)" },
-  startRing: { width: 40, height: 40, borderRadius: "50%", background: "rgba(99,102,241,0.1)", border: "2px solid #6366f1", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 10px" },
-  startLabel: { fontSize: 11, fontWeight: 800, color: "#6366f1", letterSpacing: "0.1em" },
+  startNode: { background: "#fff", border: "2px solid #1a56db", borderRadius: 16, padding: "20px 28px", textAlign: "center", cursor: "pointer", minWidth: 160, boxShadow: "0 0 0 4px rgba(26,86,219,0.08)", transition: "all 200ms" },
+  startNodeRunning: { background: "#eff6ff", boxShadow: "0 0 0 4px rgba(26,86,219,0.2)" },
+  startRing: { width: 40, height: 40, borderRadius: "50%", background: "rgba(26,86,219,0.1)", border: "2px solid #1a56db", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 10px" },
+  startLabel: { fontSize: 11, fontWeight: 800, color: "#1a56db", letterSpacing: "0.1em" },
   startHint: { fontSize: 10, color: "#94a3b8", marginTop: 4 },
   endNode: { background: "#fff", border: "2px solid #e2e8f0", borderRadius: 16, padding: "20px 28px", textAlign: "center", minWidth: 160, boxShadow: "0 1px 8px rgba(15,23,42,0.06)" },
   endRing: { width: 40, height: 40, borderRadius: "50%", background: "#f1f5f9", border: "2px solid #cbd5e1", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 10px" },
@@ -407,7 +429,7 @@ const s = {
   leftTitle: { fontSize: 10, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.08em", padding: "8px 16px 8px", textTransform: "uppercase" },
   taskList: { flex: 1, overflowY: "auto", padding: "0 8px 16px" },
   taskItem: { padding: "10px 12px", borderRadius: 8, cursor: "pointer", marginBottom: 4, transition: "background 150ms" },
-  taskItemActive: { background: "#ede9fe" },
+  taskItemActive: { background: "#fff0e0" },
   taskItemName: { fontSize: 13, fontWeight: 600, color: "#0f172a", marginBottom: 2 },
   taskItemDesc: { fontSize: 11, color: "#94a3b8", lineHeight: 1.4 },
 
@@ -415,7 +437,7 @@ const s = {
   topTaskName: { fontSize: 14, fontWeight: 700, color: "#0f172a" },
   topDivider: { width: 1, height: 20, background: "#e2e8f0" },
   statusPill: { display: "flex", alignItems: "center", padding: "5px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600 },
-  runBtn: { background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer" },
+  runBtn: { background: "#1a56db", color: "#fff", border: "none", borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer" },
 
   infoBar: { display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: "6px 14px", boxShadow: "0 1px 4px rgba(15,23,42,0.06)" },
   infoText: { fontSize: 11, color: "#94a3b8", fontWeight: 600 },

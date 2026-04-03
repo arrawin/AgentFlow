@@ -64,7 +64,9 @@ export default function RunHistory() {
   })();
 
   const filteredRuns = runs.filter((r) => {
-    if (triggerFilter !== "all" && r.triggered_by !== triggerFilter) return false;
+    if (triggerFilter === "triggered") {
+      if (!r.triggered_by?.startsWith("trigger:")) return false;
+    } else if (triggerFilter !== "all" && r.triggered_by !== triggerFilter) return false;
     if (!searchQuery) return true;
     const name = getTaskName(r.task_id).toLowerCase();
     return name.includes(searchQuery.toLowerCase()) || r.status?.includes(searchQuery.toLowerCase());
@@ -98,7 +100,41 @@ export default function RunHistory() {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
             Filters
           </button>
-          <button style={s.filterBtn}>
+          <button style={s.filterBtn} onClick={() => {
+            const headers = ["Run ID", "Task Name", "Triggered By", "Status", "Started At", "Ended At", "Duration", "Final Output"];
+            const rows = filteredRuns.map(r => {
+              const dur = (() => {
+                if (!r.started_at || !r.ended_at) return "";
+                const ms = new Date(r.ended_at) - new Date(r.started_at);
+                return ms > 0 ? (ms > 1000 ? `${(ms/1000).toFixed(1)}s` : `${ms}ms`) : "";
+              })();
+              return [
+                `#${r.id}`,
+                getTaskName(r.task_id),
+                (() => {
+                  const tb = r.triggered_by;
+                  if (!tb || tb === "manual") return "Manual";
+                  if (tb === "scheduler") return "Scheduled (Cron)";
+                  if (tb.startsWith("trigger:")) {
+                    const type = tb.split(":")[1];
+                    return type.split("_").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ") + " Event";
+                  }
+                  return tb;
+                })(),
+                r.status,
+                r.started_at ? new Date(r.started_at).toLocaleString() : "",
+                r.ended_at ? new Date(r.ended_at).toLocaleString() : "",
+                dur,
+                (r.final_output || "").replace(/"/g, '""').replace(/\n/g, " "),
+              ].map(v => `"${v}"`).join(",");
+            });
+            const csv = [headers.join(","), ...rows].join("\n");
+            const blob = new Blob([csv], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = `run_history_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click(); URL.revokeObjectURL(url);
+          }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Export CSV
           </button>
@@ -125,15 +161,22 @@ export default function RunHistory() {
       <div style={s.tableCard}>
         {/* Filter toggle */}
         <div style={s.tableToolbar}>
-          {["all", "manual", "scheduler"].map(f => (
+          {[
+            { key: "all", label: "All Runs" },
+            { key: "manual", label: "Manual" },
+            { key: "scheduler", label: "Scheduled" },
+            { key: "triggered", label: "Triggered" },
+          ].map(f => (
             <button
-              key={f}
-              style={{ ...s.filterToggle, ...(triggerFilter === f ? s.filterToggleActive : {}) }}
-              onClick={() => { setTriggerFilter(f); setPage(1); }}
+              key={f.key}
+              style={{ ...s.filterToggle, ...(triggerFilter === f.key ? s.filterToggleActive : {}) }}
+              onClick={() => { setTriggerFilter(f.key); setPage(1); }}
             >
-              {f === "all" ? "All Runs" : f === "manual" ? "Manual" : "Scheduled"}
-              <span style={{ ...s.filterCount, background: triggerFilter === f ? "#6366f120" : "#f1f5f9", color: triggerFilter === f ? "#6366f1" : "#94a3b8" }}>
-                {f === "all" ? runs.length : runs.filter(r => r.triggered_by === f).length}
+              {f.label}
+              <span style={{ ...s.filterCount, background: triggerFilter === f.key ? "#6366f120" : "#f1f5f9", color: triggerFilter === f.key ? "#6366f1" : "#94a3b8" }}>
+                {f.key === "all" ? runs.length :
+                 f.key === "triggered" ? runs.filter(r => r.triggered_by?.startsWith("trigger:")).length :
+                 runs.filter(r => r.triggered_by === f.key).length}
               </span>
             </button>
           ))}
@@ -175,7 +218,18 @@ export default function RunHistory() {
                       <div style={{ ...s.statusDot, background: run.status === "failed" ? "#ef4444" : run.status === "completed" ? "#10b981" : run.status === "in_progress" ? "#f59e0b" : "#94a3b8" }} />
                       <div>
                         <div style={s.taskName}>{getTaskName(run.task_id)}</div>
-                        <div style={s.taskSub}>{run.triggered_by === "scheduler" ? "Scheduled" : "Manual"}</div>
+                        <div style={s.taskSub}>{
+                          (() => {
+                            const tb = run.triggered_by;
+                            if (!tb || tb === "manual") return "Manual";
+                            if (tb === "scheduler") return "Scheduled (Cron)";
+                            if (tb.startsWith("trigger:")) {
+                              const type = tb.split(":")[1];
+                              return type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') + " Event";
+                            }
+                            return tb;
+                          })()
+                        }</div>
                       </div>
                     </td>
                     <td style={s.tdTime}>{formatDate(run.started_at)}</td>
