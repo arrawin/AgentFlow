@@ -107,7 +107,7 @@ export default function Sidebar({ collapsed, onToggle }) {
               >
                 {({ isActive }) => (
                   <>
-                    {isActive && !collapsed && <div style={s.activeBar} />}
+                    {isActive && <div style={s.activeBar} />}
                     <span style={{ ...s.iconWrap, color: isActive ? "var(--secondary)" : "var(--on-surface-variant)" }}>
                       {item.icon}
                     </span>

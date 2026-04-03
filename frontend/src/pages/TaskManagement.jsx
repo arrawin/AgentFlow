@@ -722,7 +722,7 @@ export default function TaskManagement() {
                     style={s.runBtn}
                     onClick={() => navigate(`/tasks/${task.id}/canvas`)}
                   >
-                    ▶ Run
+                    Canvas
                   </button>
                   <button
                     style={{ ...s.dryRunBtn, ...(dryRunning === task.id ? { opacity: 0.6 } : {}) }}

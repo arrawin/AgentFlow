@@ -2,238 +2,196 @@ import { useEffect, useState } from "react";
 import api from "../api/client";
 import { useNavigate } from "react-router-dom";
 
-const FEATURE_CARDS = [
-  {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-    ),
-    title: "Agents",
-    desc: "Create and configure AI agents with custom skills, tools, and LLM backends.",
-    action: "/agents",
-    label: "Manage Agents",
-    accent: "#1a56db",
-    bg: "#dbeafe",
-  },
-  {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12h6M12 9v6"/></svg>
-    ),
-    title: "Tasks",
-    desc: "Build multi-agent workflows and run them on demand or on a schedule.",
-    action: "/tasks",
-    label: "Create Task",
-    accent: "#ea6c00",
-    bg: "#fff0e0",
-  },
-  {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-    ),
-    title: "Run History",
-    desc: "Inspect execution traces, outputs, and generated files from every run.",
-    action: "/runs",
-    label: "View Runs",
-    accent: "#059669",
-    bg: "#d1fae5",
-  },
-  {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    ),
-    title: "Scheduler",
-    desc: "Automate task execution with cron expressions or event-based triggers.",
-    action: "/scheduler",
-    label: "Set Schedule",
-    accent: "#7c3aed",
-    bg: "#ede9fe",
-  },
-  {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
-    ),
-    title: "Tools",
-    desc: "Browse available tools — web search, file reader, file writer and more.",
-    action: "/tools",
-    label: "View Tools",
-    accent: "#0891b2",
-    bg: "#cffafe",
-  },
-  {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
-    ),
-    title: "LLM Settings",
-    desc: "Connect Groq, OpenAI, Anthropic, Gemini or Ollama as your model backend.",
-    action: "/llm-settings",
-    label: "Configure LLM",
-    accent: "#ea6c00",
-    bg: "#fff0e0",
-  },
+const GUIDE_STEPS = [
+  { icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>, title: "Agents", desc: "Configure specialists and tool access behind each workflow.", path: "/agents", accent: "#6366f1", bg: "#eff6ff" },
+  { icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>, title: "Tools", desc: "Assign web search, file access, and other capabilities.", path: "/tools", accent: "#0891b2", bg: "#ecfeff" },
+  { icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 12h6M12 9v6"/></svg>, title: "Tasks", desc: "Define task briefs and arrange multi-agent workflows.", path: "/tasks", accent: "#ea6c00", bg: "#fff7ed" },
+  { icon: <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>, title: "Scheduler", desc: "Automate recurring tasks with cron triggers.", path: "/scheduler", accent: "#7c3aed", bg: "#f5f3ff" },
 ];
+
+const SC = { completed: { color: "#16a34a", bg: "#dcfce7" }, failed: { color: "#ef4444", bg: "#fef2f2" }, in_progress: { color: "#f59e0b", bg: "#fef9c3" }, not_started: { color: "#94a3b8", bg: "#f1f5f9" } };
 
 export default function Dashboard() {
   const [data, setData] = useState(null);
-  const [agents, setAgents] = useState([]);
   const navigate = useNavigate();
-
-  useEffect(() => {
-    api.get("/dashboard").then((r) => setData(r.data)).catch(console.error);
-    api.get("/agents").then((r) => setAgents(r.data)).catch(console.error);
-  }, []);
+  useEffect(() => { api.get("/dashboard").then(r => setData(r.data)).catch(console.error); }, []);
+  const latestRun = data?.recent_runs?.[0];
+  const recentRuns = data?.recent_runs || [];
 
   return (
     <div className="animate-up" style={s.container}>
 
       {/* Hero */}
       <section style={s.hero}>
-        <div style={s.badge}>AI WORKFLOW PLATFORM</div>
-        <h1 style={s.heroTitle}>
-          Orchestrate <span style={s.accentBlue}>Intelligent</span> Agents,{" "}
-          <span style={s.accentOrange}>Automate</span> Everything
-        </h1>
-        <p style={s.heroSub}>
-          Build multi-agent workflows, run them on demand or on a schedule, and inspect every execution trace — all from one place.
-        </p>
-        <div style={s.heroActions}>
-          <button className="btn-primary" onClick={() => navigate("/tasks")} style={s.ctaBtn}>
-            Create a Task
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-          </button>
-          <button className="btn-secondary" onClick={() => navigate("/agents")} style={s.ctaBtn}>Add an Agent</button>
-        </div>
-      </section>
-
-      {/* Feature Cards */}
-      <section style={s.featureSection}>
-        <div style={s.sectionLabel}>WHAT YOU CAN DO</div>
-        <div style={s.featureGrid}>
-          {FEATURE_CARDS.map((f) => (
-            <FeatureCard key={f.title} {...f} onAction={() => navigate(f.action)} />
-          ))}
-        </div>
-      </section>
-
-      {/* Stats */}
-      <section style={s.statsGrid}>
-        <StatCard
-          icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="7" r="4"/><path d="M4 21v-2a4 4 0 014-4h8a4 4 0 014 4v2"/></svg>}
-          iconBg="#eff6ff" iconColor="#3b82f6" label="Total Agents" value={data?.agents_count ?? "—"} />
-        <StatCard
-          icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>}
-          iconBg="#f0fdf4" iconColor="#16a34a" label="Active Tasks" value={data?.tasks_count ?? "—"} />
-        <StatCard
-          icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>}
-          iconBg="#f5f3ff" iconColor="#7c3aed" label="Schedules" value={data?.schedules_count ?? "—"} />
-        <StatCard
-          icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>}
-          iconBg="#f0fdf4" iconColor="#059669" label="Success Rate" value={data?.success_rate ?? "—"} />
-      </section>
-
-      {/* Recent Runs */}
-      <section style={s.recentSection}>
-        <div style={s.recentHeader}>
-          <div>
-            <div style={s.sectionLabel}>RECENT RUNS</div>
+        <div style={s.heroAccent} />
+        <div style={s.heroLeft}>
+          <div style={s.heroContentWrap}>
+            <div style={s.heroLabel}>OPERATIONS OVERVIEW</div>
+            <h1 style={s.heroTitle}>A calmer command center for agents and tasks.</h1>
+            <p style={s.heroSub}>Build multi-agent workflows, run them on demand or on a schedule, and inspect every execution trace with precision.</p>
+            <div style={s.heroActions}>
+              <button className="btn-primary" style={s.ctaBtnPrimary} onClick={() => navigate("/tasks")}>Create Task</button>
+              <button className="btn-secondary" style={s.ctaBtnSecondary} onClick={() => navigate("/runs")}>Review Recent Runs</button>
+            </div>
           </div>
-          <button style={s.viewAllBtn} onClick={() => navigate("/runs")}>View All →</button>
         </div>
-        <div style={s.tableWrap}>
-          <table>
-            <thead>
-              <tr>
-                <th>RUN ID</th>
-                <th>TASK</th>
-                <th>TRIGGERED BY</th>
-                <th>STARTED</th>
-                <th>STATUS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data?.recent_runs?.length > 0 ? data.recent_runs.map(run => (
-                <tr key={run.id}>
-                  <td style={s.mono}>#{run.id}</td>
-                  <td style={{ fontWeight: 600 }}>{run.task_name || `Task #${run.task_id}`}</td>
-                  <td style={{ color: "var(--on-surface-variant)" }}>{run.triggered_by || "manual"}</td>
-                  <td style={s.mono}>{new Date(run.started_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</td>
-                  <td><StatusPill status={run.status} /></td>
+        <div style={s.heroRight}>
+          <div style={s.focusCard}>
+            <div style={s.focusLabel}>Focus Today</div>
+            <div style={s.focusValue}>{data?.tasks_count ?? "0"} active tasks</div>
+            <div style={s.focusHint}>Pair task setup with agents first, then move into canvas refinement only when sequence details matter.</div>
+          </div>
+          <div style={s.miniStats}>
+            {[
+              { label: "Agents",    value: data?.agents_count,    color: "#4f46e5", bg: "#f5f3ff" },
+              { label: "Schedules", value: data?.schedules_count, color: "#7c3aed", bg: "#f5f3ff" },
+              { label: "Runs",      value: recentRuns.length,     color: "#0891b2", bg: "#ecfeff" },
+              { label: "Success",   value: data?.success_rate,    color: "#16a34a", bg: "#dcfce7" },
+            ].map(stat => (
+              <div key={stat.label} style={{ ...s.miniStat, background: stat.bg }}>
+                <div style={{ ...s.miniStatLabel, color: stat.color }}>{stat.label}</div>
+                <div style={{ ...s.miniStatValue, color: stat.color }}>{stat.value ?? "—"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Guide + Latest Activity */}
+      <section style={s.midSection}>
+        <div style={s.guideSection}>
+          <div style={s.sectionHeader}>
+            <div style={s.sectionLabel}>START HERE</div>
+            <h2 style={s.sectionTitle}>Guided Sequence</h2>
+          </div>
+          <div style={s.guideGrid}>
+            {GUIDE_STEPS.map(step => (
+              <div key={step.title} style={s.guideCard} onClick={() => navigate(step.path)}>
+                <div style={{ ...s.guideIcon, background: step.bg, color: step.accent }}>{step.icon}</div>
+                <div>
+                  <div style={{ ...s.guideCardTitle, color: step.accent }}>{step.title}</div>
+                  <div style={s.guideCardDesc}>{step.desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={s.activitySection}>
+          <div style={s.sectionHeader}>
+            <div style={s.sectionLabel}>&nbsp;</div>
+            <h2 style={s.sectionTitle}>Latest Activity</h2>
+          </div>
+          <div style={s.activityCard}>
+            {latestRun ? (
+              <>
+                <div style={s.activityTitle}>{latestRun.task_name || `Task #${latestRun.task_id}`}</div>
+                <div style={s.activityMeta}>
+                  {new Date(latestRun.started_at).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}
+                  <div style={{ marginTop: 6 }}>
+                    <span style={{ ...s.statusPill, background: SC[latestRun.status]?.bg || "#f1f5f9", color: SC[latestRun.status]?.color || "#94a3b8" }}>
+                      {latestRun.status}
+                    </span>
+                  </div>
+                </div>
+                <button style={s.activityBtn} onClick={() => navigate("/runs")}>Open Run History</button>
+              </>
+            ) : (
+              <>
+                <div style={s.activityTitle}>No runs yet</div>
+                <div style={s.activityMeta}>Create a task and run it to see activity here.</div>
+                <button style={s.activityBtn} onClick={() => navigate("/tasks")}>Create a Task</button>
+              </>
+            )}
+          </div>
+        </div>
+      </section>
+
+      {/* Recent Runs Table */}
+      <section style={s.tableSection}>
+        <div style={s.tableHeader}>
+          <div>
+            <div style={s.sectionLabel}>EXECUTION LOGS</div>
+            <h2 style={s.sectionTitle}>Recent Task Runs</h2>
+          </div>
+          <button style={s.viewAllBtn} onClick={() => navigate("/runs")}>View All Runs →</button>
+        </div>
+        <table style={s.table}>
+          <thead>
+            <tr style={s.theadRow}>
+              {["RUN ID","TASK","TRIGGER","STARTED","STATUS"].map(h => <th key={h} style={s.th}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {recentRuns.length > 0 ? recentRuns.map(run => {
+              const sc = SC[run.status] || SC.not_started;
+              return (
+                <tr key={run.id} style={s.tr}>
+                  <td style={s.tdMono}>#{run.id}</td>
+                  <td style={s.tdName}>{run.task_name || `Task #${run.task_id}`}</td>
+                  <td style={s.tdMeta}>{run.triggered_by === "scheduler" ? "Scheduled" : "Manual"}</td>
+                  <td style={s.tdMeta}>{new Date(run.started_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}</td>
+                  <td><span style={{ ...s.statusPill, background: sc.bg, color: sc.color }}>{run.status}</span></td>
                 </tr>
-              )) : (
-                <tr><td colSpan="5" style={s.emptyRow}>No runs yet — create a task and run it</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+              );
+            }) : (
+              <tr><td colSpan="5" style={s.emptyRow}>No runs yet — create a task and run it</td></tr>
+            )}
+          </tbody>
+        </table>
       </section>
 
     </div>
   );
-}
-
-function StatCard({ icon, iconBg, iconColor, label, value }) {
-  return (
-    <div style={s.statCard}>
-      <div style={{ ...s.statIconWrap, background: iconBg, color: iconColor }}>{icon}</div>
-      <div style={s.statLabel}>{label}</div>
-      <div style={{ ...s.statValue, color: iconColor }}>{value}</div>
-    </div>
-  );
-}
-
-function FeatureCard({ icon, title, desc, label, accent, bg, onAction }) {
-  return (
-    <div style={s.fCard}>
-      <div style={{ ...s.fIcon, background: bg, color: accent }}>{icon}</div>
-      <div style={s.fTitle}>{title}</div>
-      <div style={s.fDesc}>{desc}</div>
-      <button style={{ ...s.fBtn, color: accent, borderColor: accent + "40", background: bg }} onClick={onAction}>
-        {label} →
-      </button>
-    </div>
-  );
-}
-
-function StatusPill({ status }) {
-  const map = {
-    completed:   { label: "Completed",   cls: "status-success" },
-    in_progress: { label: "In Progress", cls: "status-pending" },
-    failed:      { label: "Failed",      cls: "status-failed" },
-    not_started: { label: "Not Started", cls: "status-neutral" },
-  };
-  const { label, cls } = map[status] || { label: status, cls: "status-neutral" };
-  return <span className={`status-pill ${cls}`}>{label}</span>;
 }
 
 const s = {
-  container: { paddingBottom: 64 },
-
-  hero: { padding: "56px 0 48px", textAlign: "center", maxWidth: 820, margin: "0 auto" },
-  badge: { fontSize: 10, fontWeight: 800, color: "#1a56db", background: "#dbeafe", display: "inline-block", padding: "4px 12px", borderRadius: 99, marginBottom: 20, letterSpacing: "0.1em" },
-  heroTitle: { fontSize: "2.8rem", fontWeight: 800, lineHeight: 1.15, marginBottom: 20, color: "var(--on-surface)" },
-  accentBlue: { color: "#1a56db" },
-  accentOrange: { color: "#ea6c00" },
-  heroSub: { fontSize: "1rem", color: "var(--on-surface-variant)", lineHeight: 1.7, maxWidth: 600, margin: "0 auto 32px" },
-  heroActions: { display: "flex", gap: 12, justifyContent: "center" },
-  ctaBtn: { padding: "11px 24px", fontSize: 13, display: "flex", alignItems: "center", gap: 8 },
-
-  statsGrid: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 48 },
-  statCard: { background: "var(--surface-bright)", borderRadius: 14, padding: "20px 24px", boxShadow: "var(--ambient-shadow)", display: "flex", flexDirection: "column", gap: 8 },
-  statIconWrap: { width: 36, height: 36, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 },
-  statLabel: { fontSize: 12, fontWeight: 600, color: "var(--on-surface-variant)" },
-  statValue: { fontSize: 30, fontWeight: 800 },
-
-  featureSection: { marginBottom: 32 },
-  sectionLabel: { fontSize: 11, fontWeight: 800, color: "var(--on-surface-variant)", letterSpacing: "0.1em", marginBottom: 16 },
-  featureGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 },
-  fCard: { background: "var(--surface-bright)", borderRadius: 14, padding: 24, boxShadow: "var(--ambient-shadow)", display: "flex", flexDirection: "column", gap: 10 },
-  fIcon: { width: 44, height: 44, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
-  fTitle: { fontSize: 15, fontWeight: 800, color: "var(--on-surface)" },
-  fDesc: { fontSize: 12, color: "var(--on-surface-variant)", lineHeight: 1.6, flex: 1 },
-  fBtn: { alignSelf: "flex-start", fontSize: 12, fontWeight: 700, padding: "6px 14px", borderRadius: 8, border: "1px solid", background: "transparent", marginTop: 4 },
-
-  recentSection: { background: "var(--surface-bright)", borderRadius: 14, padding: 24, boxShadow: "var(--ambient-shadow)" },
-  recentHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 },
-  viewAllBtn: { fontSize: 12, fontWeight: 700, color: "#1a56db", background: "transparent", border: "none", padding: 0 },
-  tableWrap: {},
-  mono: { fontFamily: "monospace", fontSize: 12, color: "var(--on-surface-variant)" },
-  emptyRow: { textAlign: "center", color: "var(--on-surface-variant)", padding: "32px 0", fontSize: 13 },
+  container: { paddingBottom: 80, maxWidth: 1400, margin: "0 auto" },
+  hero: { display: "grid", gridTemplateColumns: "1fr 320px", gap: 32, marginBottom: 48, background: "var(--surface-bright)", borderRadius: 24, padding: "48px 56px", boxShadow: "0 10px 40px -10px rgba(0,0,0,0.05)", position: "relative", overflow: "hidden", minHeight: 380 },
+  heroAccent: { position: "absolute", top: 0, left: 0, right: 0, height: 6, background: "linear-gradient(90deg, #6366f1 0%, #0891b2 35%, #ea6c00 65%, #7c3aed 100%)" },
+  heroLeft: { display: "flex", flexDirection: "column", justifyContent: "center" },
+  heroContentWrap: { display: "flex", flexDirection: "column", gap: 20 },
+  heroLabel: { fontSize: 12, fontWeight: 800, color: "#4f46e5", letterSpacing: "0.15em", fontFamily: "Manrope" },
+  heroTitle: { fontSize: "2.5rem", fontWeight: 800, lineHeight: 1.15, color: "var(--on-surface)", margin: 0, fontFamily: "Manrope", letterSpacing: "-0.02em" },
+  heroSub: { fontSize: 16, color: "var(--on-surface-variant)", lineHeight: 1.6, margin: 0, maxWidth: 500 },
+  heroActions: { display: "flex", gap: 16, marginTop: 12 },
+  ctaBtnPrimary: { padding: "14px 28px", fontSize: 15, fontWeight: 700, borderRadius: 12, background: "linear-gradient(135deg, #131b2e 0%, #000000 100%)", color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 4px 12px rgba(0,0,0,0.1)" },
+  ctaBtnSecondary: { padding: "14px 28px", fontSize: 15, fontWeight: 700, borderRadius: 12, background: "#fff", color: "var(--on-surface)", border: "1px solid var(--outline)", cursor: "pointer" },
+  heroRight: { display: "flex", flexDirection: "column", gap: 16 },
+  focusCard: { background: "linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)", borderRadius: 20, padding: "24px 28px", boxShadow: "0 10px 25px -5px rgba(79, 70, 229, 0.3)" },
+  focusLabel: { fontSize: 10, fontWeight: 800, color: "rgba(255,255,255,0.7)", letterSpacing: "0.1em", marginBottom: 10, textTransform: "uppercase" },
+  focusValue: { fontSize: 26, fontWeight: 800, color: "#fff", marginBottom: 10, fontFamily: "Manrope" },
+  focusHint: { fontSize: 12, color: "rgba(255,255,255,0.85)", lineHeight: 1.5 },
+  miniStats: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 },
+  miniStat: { borderRadius: 16, padding: "16px 20px" },
+  miniStatLabel: { fontSize: 11, fontWeight: 700, marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" },
+  miniStatValue: { fontSize: 22, fontWeight: 800, fontFamily: "Manrope" },
+  midSection: { display: "grid", gridTemplateColumns: "1fr 320px", gap: 40, marginBottom: 48 },
+  sectionHeader: { marginBottom: 24 },
+  sectionLabel: { fontSize: 11, fontWeight: 800, color: "var(--on-surface-variant)", letterSpacing: "0.15em", marginBottom: 12, textTransform: "uppercase" },
+  sectionTitle: { fontSize: 24, fontWeight: 800, color: "var(--on-surface)", margin: 0, fontFamily: "Manrope" },
+  guideSection: { display: "flex", flexDirection: "column" },
+  guideGrid: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 },
+  guideCard: { background: "var(--surface-bright)", borderRadius: 16, padding: 24, boxShadow: "var(--ambient-shadow)", cursor: "pointer", transition: "all 200ms ease", display: "flex", alignItems: "flex-start", gap: 18, border: "1px solid transparent" },
+  guideIcon: { width: 48, height: 48, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  guideCardTitle: { fontSize: 18, fontWeight: 800, marginBottom: 6, fontFamily: "Manrope" },
+  guideCardDesc: { fontSize: 13, color: "var(--on-surface-variant)", lineHeight: 1.5 },
+  activitySection: { display: "flex", flexDirection: "column", marginTop: 12 },
+  activityCard: { background: "var(--surface-bright)", borderRadius: 16, padding: 28, boxShadow: "var(--ambient-shadow)", display: "flex", flexDirection: "column", gap: 16, borderTop: "4px solid #4f46e5" },
+  activityTitle: { fontSize: 20, fontWeight: 800, color: "var(--on-surface)", fontFamily: "Manrope" },
+  activityMeta: { fontSize: 14, color: "var(--on-surface-variant)", lineHeight: 1.5 },
+  activityBtn: { alignSelf: "flex-start", marginTop: 8, background: "var(--primary)", border: "none", borderRadius: 10, padding: "10px 20px", fontSize: 14, fontWeight: 700, color: "#fff", cursor: "pointer", transition: "opacity 150ms" },
+  tableSection: { background: "var(--surface-bright)", borderRadius: 20, boxShadow: "var(--ambient-shadow)", overflow: "hidden", padding: "4px" },
+  tableHeader: { display: "flex", justifyContent: "space-between", alignItems: "flex-end", padding: "32px 32px 24px" },
+  viewAllBtn: { fontSize: 14, fontWeight: 700, color: "#4f46e5", background: "transparent", border: "none", cursor: "pointer", padding: "8px 0" },
+  table: { width: "100%", borderCollapse: "collapse" },
+  theadRow: { background: "var(--surface-container-low)" },
+  th: { padding: "16px 32px", fontSize: 11, fontWeight: 800, color: "var(--on-surface-variant)", textAlign: "left", letterSpacing: "0.1em", textTransform: "uppercase" },
+  tr: { borderBottom: "1px solid var(--surface-container-low)", transition: "background 150ms" },
+  tdMono: { padding: "20px 32px", fontFamily: "monospace", fontSize: 14, color: "#4f46e5", fontWeight: 700 },
+  tdName: { padding: "20px 32px", fontSize: 15, fontWeight: 600, color: "var(--on-surface)" },
+  tdMeta: { padding: "20px 32px", fontSize: 14, color: "var(--on-surface-variant)" },
+  statusPill: { fontSize: 11, fontWeight: 800, padding: "4px 12px", borderRadius: 99, display: "inline-block", textTransform: "uppercase", letterSpacing: "0.02em" },
+  emptyRow: { textAlign: "center", color: "var(--on-surface-variant)", padding: "48px 0", fontSize: 15 },
 };
+

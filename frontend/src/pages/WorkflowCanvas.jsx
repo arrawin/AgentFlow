@@ -88,7 +88,7 @@ export default function WorkflowCanvas() {
   const [running, setRunning]   = useState(false);
   const [toast, setToast]       = useState(null);
   const [nodeStatuses, setNodeStatuses] = useState({}); // { nodeId: "idle"|"running"|"completed"|"failed" }
-  const [currentRunId, setCurrentRunId] = useState(null);
+  const [runOutputs, setRunOutputs] = useState(null); // { nodes: [...], final_output }
   const pollRef = useState(null);
 
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
@@ -226,6 +226,15 @@ export default function WorkflowCanvas() {
           setRunning(false);
           showToast(run.status === "completed" ? "Workflow completed ✓" : "Workflow failed", run.status === "completed");
           setNodes(nds => nds.map(n => n.id === "start" ? { ...n, data: { ...n.data, running: false, onStart: handleRun } } : n));
+          // Fetch trace for output display
+          const traceData = traceRes.data.trace || [];
+          const graphNds = workflow?.graph_json?.nodes || [];
+          const outputs = graphNds.map((n, i) => {
+            const outputLog = traceData.filter(l => l.node_id === n.id && l.event_type === "output").pop();
+            const agent = agents.find(a => a.id === n.agent_id);
+            return { node_id: n.id, agent_name: agent?.name || `Agent #${n.agent_id}`, output: outputLog?.message || "", index: i };
+          });
+          setRunOutputs({ nodes: outputs, final_output: run.final_output });
         }
       } catch (e) {
         console.error(e);
@@ -252,7 +261,8 @@ export default function WorkflowCanvas() {
   const graphNodes = workflow?.graph_json?.nodes || [];
 
   return (
-    <div style={{ display: "flex", width: "100vw", height: "100vh", background: "#f8fafc" }}>
+    <div style={{ display: "flex", width: "100vw", height: "100vh", background: "#f8fafc", flexDirection: "column" }}>
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
 
       {/* Left panel — task list */}
       <div style={s.leftPanel}>
@@ -327,6 +337,35 @@ export default function WorkflowCanvas() {
         </ReactFlow>
       </div>
 
+      </div>
+
+      {/* Agent outputs below canvas — shown after run completes */}
+      {runOutputs && (
+        <div style={s.outputPanel}>
+          <div style={s.outputPanelHeader}>
+            <span style={s.outputPanelTitle}>Execution Results</span>
+            <button style={s.outputCloseBtn} onClick={() => setRunOutputs(null)}>✕</button>
+          </div>
+          <div style={s.outputGrid}>
+            {runOutputs.nodes.map((n, i) => (
+              <div key={n.node_id} style={s.outputCard}>
+                <div style={s.outputCardHeader}>
+                  <span style={s.outputStep}>STEP {i + 1}</span>
+                  <span style={s.outputAgentName}>{n.agent_name}</span>
+                </div>
+                <div style={s.outputText}>{n.output?.slice(0, 300) || "No output"}{n.output?.length > 300 ? "..." : ""}</div>
+              </div>
+            ))}
+          </div>
+          {runOutputs.final_output && (
+            <div style={s.finalOutput}>
+              <div style={s.finalOutputLabel}>FINAL OUTPUT</div>
+              <div style={s.finalOutputText}>{runOutputs.final_output.slice(0, 500)}{runOutputs.final_output.length > 500 ? "..." : ""}</div>
+            </div>
+          )}
+        </div>
+      )}
+
       {toast && (
         <div style={{ ...s.toast, background: toast.ok ? "#dcfce7" : "#fee2e2", color: toast.ok ? "#15803d" : "#dc2626" }}>
           {toast.msg}
@@ -382,4 +421,17 @@ const s = {
   infoText: { fontSize: 11, color: "#94a3b8", fontWeight: 600 },
 
   toast: { position: "fixed", bottom: 24, right: 24, padding: "10px 18px", borderRadius: 10, fontSize: 13, fontWeight: 600, zIndex: 9999, boxShadow: "0 4px 12px rgba(0,0,0,0.1)" },
+  outputPanel: { background: "#fff", borderTop: "1px solid #e2e8f0", padding: "16px 24px", maxHeight: 280, overflowY: "auto", flexShrink: 0 },
+  outputPanelHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 },
+  outputPanelTitle: { fontSize: 12, fontWeight: 800, color: "#0f172a", letterSpacing: "0.06em" },
+  outputCloseBtn: { background: "transparent", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 14 },
+  outputGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12, marginBottom: 12 },
+  outputCard: { background: "#f8fafc", borderRadius: 10, padding: 14, border: "1px solid #e2e8f0" },
+  outputCardHeader: { display: "flex", alignItems: "center", gap: 8, marginBottom: 8 },
+  outputStep: { fontSize: 9, fontWeight: 800, background: "#e2e8f0", color: "#64748b", padding: "2px 7px", borderRadius: 6, letterSpacing: "0.05em" },
+  outputAgentName: { fontSize: 12, fontWeight: 700, color: "#0f172a" },
+  outputText: { fontSize: 11, color: "#475569", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" },
+  finalOutput: { background: "#f0fdf4", borderRadius: 10, padding: 14, border: "1px solid #bbf7d0" },
+  finalOutputLabel: { fontSize: 9, fontWeight: 800, color: "#15803d", letterSpacing: "0.06em", marginBottom: 6 },
+  finalOutputText: { fontSize: 12, color: "#166534", lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word" },
 };

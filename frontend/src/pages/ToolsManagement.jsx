@@ -81,6 +81,21 @@ export default function ToolsManagement() {
     }
   };
 
+  const saveAll = async () => {
+    try {
+      await Promise.all(
+        filteredAgents.map(a =>
+          api.put(`/agents/${a.id}/tools`, { allowed_tools: Array.from(permissions[a.id] || []) })
+        )
+      );
+      setToast({ msg: `Saved all ${filteredAgents.length} agents`, ok: true });
+      setTimeout(() => setToast(null), 3000);
+    } catch (e) {
+      setToast({ msg: e.response?.data?.detail || "Save All failed", ok: false });
+      setTimeout(() => setToast(null), 3000);
+    }
+  };
+
   const filteredAgents = agents.filter(a => a.name.toLowerCase().includes(agentSearch.toLowerCase()));
   const totalPages = Math.ceil(filteredAgents.length / PAGE_SIZE);
   const pagedAgents = filteredAgents.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -139,11 +154,10 @@ export default function ToolsManagement() {
           </div>
           <button
             style={{ background: "#1a56db", color: "#fff", border: "none", borderRadius: 8, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
-            onClick={() => filteredAgents.forEach(a => save(a.id))}
+            onClick={saveAll}
           >
             Save All
-          </button>
-        </div>
+          </button>        </div>
         <div style={s.tableScroll}>
           <table style={s.table}>
             <thead>
@@ -233,13 +247,12 @@ export default function ToolsManagement() {
                     })}
                     <td style={{ ...s.permCell, position: "sticky", right: 0, background: "#fff", zIndex: 1, borderLeft: "1px solid var(--outline)" }}>
                       <button
-                        style={{ ...s.saveBtn, background: isSaved ? "#047857" : "#059669", opacity: isSaving ? 0.6 : 1 }}
+                        style={{ ...s.saveBtn, opacity: isSaving ? 0.6 : 1 }}
                         onClick={() => save(agent.id)}
                         disabled={isSaving}
                       >
-                        {isSaving ? "..." : isSaved ? "✓" : "Save"}
-                      </button>
-                    </td>
+                        {isSaving ? "..." : "Save"}
+                      </button>                    </td>
                   </tr>
                 );
               })}
@@ -486,7 +499,7 @@ const s = {
   cellCount:    { fontSize: 10, color: "var(--on-surface-variant)", marginTop: 1 },
   permCell:     { textAlign: "center", padding: "14px 16px", borderLeft: "1px solid var(--outline)" },
   toggleBtn:    { background: "none", border: "none", cursor: "pointer", padding: 4, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 6 },
-  saveBtn:      { color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", transition: "background 300ms", whiteSpace: "nowrap" },
+  saveBtn:      { color: "#fff", border: "none", borderRadius: 6, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", transition: "background 300ms", whiteSpace: "nowrap", background: "#059669" },
   matrixFooter: { padding: "10px 16px", fontSize: 11, color: "var(--on-surface-variant)", borderTop: "1px solid var(--outline)", background: "var(--surface-container-lowest)", display: "flex", justifyContent: "space-between", alignItems: "center" },
   pageBtn:      { background: "transparent", border: "1px solid var(--outline)", borderRadius: 6, padding: "3px 9px", fontSize: 12, fontWeight: 600, color: "var(--on-surface-variant)", cursor: "pointer" },
 };
