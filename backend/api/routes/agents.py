@@ -8,9 +8,23 @@ from typing import List
 router = APIRouter()
 
 
+import re as _re
+
+def _strip_html(text: str) -> str:
+    """Remove HTML/script tags from user input."""
+    if not text:
+        return text
+    return _re.sub(r'<[^>]+>', '', text)
+
 @router.post("/agents", response_model=AgentResponse)
 def create_agent(agent: AgentCreate, db: Session = Depends(get_db)):
-    db_agent = Agent(**agent.dict())
+    # Sanitize text fields
+    data = agent.dict()
+    if data.get("skills"):
+        data["skills"] = _strip_html(data["skills"])
+    if data.get("name"):
+        data["name"] = _strip_html(data["name"])
+    db_agent = Agent(**data)
     db.add(db_agent)
     db.commit()
     db.refresh(db_agent)

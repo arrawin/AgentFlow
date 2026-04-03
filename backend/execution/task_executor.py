@@ -7,7 +7,7 @@ from langgraph.graph import StateGraph
 from tools.registry import TOOLS, TOOL_SCHEMAS, is_unsafe, build_tool_docs
 from tools.utils import UPLOAD_DIR
 from validation.workflow_validator import validate_workflow
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 
@@ -41,7 +41,7 @@ def run_task(self, task_id: int, existing_run_id: int = None, triggered_by: str 
         task_run = db.query(TaskRun).filter(TaskRun.id == existing_run_id).first()
         run_id = existing_run_id
     else:
-        task_run = TaskRun(task_id=task_id, status="in_progress", triggered_by=triggered_by, started_at=datetime.utcnow())
+        task_run = TaskRun(task_id=task_id, status="in_progress", triggered_by=triggered_by, started_at=datetime.now(timezone.utc))
         db.add(task_run)
         db.commit()
         db.refresh(task_run)
@@ -69,14 +69,14 @@ def run_task(self, task_id: int, existing_run_id: int = None, triggered_by: str 
         task = db.query(Task).filter(Task.id == task_id).first()
         if not task:
             task_run.status = "failed"
-            task_run.ended_at = datetime.utcnow()
+            task_run.ended_at = datetime.now(timezone.utc)
             db.commit()
             return
 
         workflow = db.query(Workflow).filter(Workflow.id == task.workflow_id).first()
         if not workflow:
             task_run.status = "failed"
-            task_run.ended_at = datetime.utcnow()
+            task_run.ended_at = datetime.now(timezone.utc)
             db.commit()
             return
 
@@ -87,7 +87,7 @@ def run_task(self, task_id: int, existing_run_id: int = None, triggered_by: str 
         errors = validate_workflow(graph, valid_agent_ids)
         if errors:
             task_run.status = "failed"
-            task_run.ended_at = datetime.utcnow()
+            task_run.ended_at = datetime.now(timezone.utc)
             db.commit()
             print(f"Workflow validation failed: {errors}")
             return
@@ -169,13 +169,17 @@ def run_task(self, task_id: int, existing_run_id: int = None, triggered_by: str 
                 system_prompt = f"""You are: {agent.name}
 {skills_text}
 
+YOUR AVAILABLE TOOLS: {tool_list if tool_list else "None — answer from knowledge only"}
+You MUST only use tools from the list above. Do not invent or use any other tool names.
+
 AVAILABLE FILES:
 {files_text}
 
 RULES:
 - Do NOT call the same tool with same input twice
 - Only use files from AVAILABLE FILES for reading
-- If the task requires saving output to a file, use file_writer"""
+- If the task requires saving output to a file, use file_writer
+- If file_writer is not in your available tools, do NOT attempt to write files"""
 
                 if context:
                     system_prompt += f"\n\nCONTEXT FROM PREVIOUS AGENTS:\n{context}"
@@ -323,7 +327,7 @@ RULES:
 
         task_run.status = "completed"
         task_run.final_output = final_output
-        task_run.ended_at = datetime.utcnow()
+        task_run.ended_at = datetime.now(timezone.utc)
         db.commit()
 
         print("\n" + "=" * 30)
@@ -335,7 +339,7 @@ RULES:
 
     except Exception as e:
         task_run.status = "failed"
-        task_run.ended_at = datetime.utcnow()
+        task_run.ended_at = datetime.now(timezone.utc)
         db.commit()
         print(f"Error executing task {task_id}: {str(e)}")
         import traceback
@@ -372,7 +376,7 @@ def run_scheduled_task(task_id: int, schedule_id: int):
             status="in_progress",
             triggered_by="scheduler",
             workflow_snapshot=workflow.graph_json,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
         )
         db.add(task_run)
         db.commit()

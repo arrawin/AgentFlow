@@ -7,7 +7,7 @@ API keys never enter the container.
 import subprocess
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from execution.celery_app import celery_app
 from db.database import SessionLocal
 from db.models import Task, Workflow, Agent, TaskRun, RunLog
@@ -72,7 +72,7 @@ def run_task_in_container(task_id: int, run_id: int, triggered_by: str = "trigge
         if task_run:
             task_run.status = "completed"
             task_run.final_output = final_output
-            task_run.ended_at = datetime.utcnow()
+            task_run.ended_at = datetime.now(timezone.utc)
             db.commit()
 
         return final_output
@@ -80,7 +80,7 @@ def run_task_in_container(task_id: int, run_id: int, triggered_by: str = "trigge
     except Exception as e:
         if 'task_run' in locals() and task_run:
             task_run.status = "failed"
-            task_run.ended_at = datetime.utcnow()
+            task_run.ended_at = datetime.now(timezone.utc)
             db.commit()
         print(f"[container_runner] Error: {e}")
         return f"Error: {str(e)}"

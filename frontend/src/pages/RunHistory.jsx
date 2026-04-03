@@ -3,6 +3,18 @@ import api from "../api/client";
 import Modal from "../components/Modal";
 import MarkdownOutput from "../components/MarkdownOutput";
 
+const parseDate = (d) => {
+  if (!d) return null;
+  let s = String(d).trim();
+  // Assume UTC if no timezone offset is present for naive strings
+  if (!s.match(/[Z+\-\s]\d{2}(:?\d{2})?$/) && s.match(/^\d{4}-\d{2}-\d{2}/)) {
+    s = s.replace(" ", "T");
+    if (!s.includes("Z")) s += "Z";
+  }
+  const dt = new Date(s);
+  return isNaN(dt.getTime()) ? null : dt;
+};
+
 export default function RunHistory() {
   const [runs, setRuns] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -49,24 +61,27 @@ export default function RunHistory() {
   const completedRuns = runs.filter((r) => r.status === "completed").length;
   const failedRuns = runs.filter((r) => r.status === "failed").length;
   const successRate = totalRuns > 0 ? ((completedRuns / totalRuns) * 100).toFixed(1) : "100";
-  const avgExec = (() => {
-    const finished = runs.filter((r) => r.started_at && r.ended_at);
-    if (!finished.length) return "—";
-    const total = finished.reduce((sum, r) => {
-      const start = new Date(r.started_at).getTime();
-      const end = new Date(r.ended_at).getTime();
-      const diff = end - start;
-      return sum + (diff > 0 ? diff : 0); // ignore negative diffs from timezone issues
-    }, 0);
-    const avg = total / finished.length;
-    if (avg <= 0) return "—";
-    return avg > 1000 ? `${(avg / 1000).toFixed(1)}s` : `${Math.round(avg)}ms`;
+  const topTask = (() => {
+    if (!runs.length) return "—";
+    const counts = {};
+    runs.forEach(r => {
+      const name = getTaskName(r.task_id);
+      counts[name] = (counts[name] || 0) + 1;
+    });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    const top = sorted[0][0];
+    return top.length > 15 ? top.slice(0, 12) + "..." : top;
   })();
 
   const filteredRuns = runs.filter((r) => {
-    if (triggerFilter === "triggered") {
-      if (!r.triggered_by?.startsWith("trigger:")) return false;
-    } else if (triggerFilter !== "all" && r.triggered_by !== triggerFilter) return false;
+    if (triggerFilter === "all") return true;
+    if (triggerFilter === "manual") return !r.triggered_by || r.triggered_by === "manual";
+    if (triggerFilter === "scheduler") return r.triggered_by === "scheduler" || r.triggered_by === "trigger:cron";
+    if (triggerFilter === "file_watch") return r.triggered_by === "trigger:file_watch";
+    if (triggerFilter === "folder_watch") return r.triggered_by === "trigger:folder_watch";
+    if (triggerFilter === "event") return r.triggered_by === "trigger:email" || r.triggered_by === "trigger:event";
+    return true;
+  }).filter(r => {
     if (!searchQuery) return true;
     const name = getTaskName(r.task_id).toLowerCase();
     return name.includes(searchQuery.toLowerCase()) || r.status?.includes(searchQuery.toLowerCase());
@@ -96,10 +111,7 @@ export default function RunHistory() {
               onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
             />
           </div>
-          <button style={s.filterBtn}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
-            Filters
-          </button>
+
           <button style={s.filterBtn} onClick={() => {
             const headers = ["Run ID", "Task Name", "Triggered By", "Status", "Started At", "Ended At", "Duration", "Final Output"];
             const rows = filteredRuns.map(r => {
@@ -149,9 +161,9 @@ export default function RunHistory() {
         <StatCard label="SUCCESS RATE" value={`${successRate}%`}
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>}
           iconBg="#f0fdf4" iconColor="#10b981" trend="Stable" trendUp />
-        <StatCard label="AVG EXECUTION" value={avgExec}
-          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>}
-          iconBg="#fffbeb" iconColor="#f59e0b" trend="Duration" />
+        <StatCard label="TOP PERFORMING" value={topTask}
+          icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>}
+          iconBg="#fffbeb" iconColor="#f59e0b" trend="Most Active" />
         <StatCard label="FAILED RUNS" value={failedRuns}
           icon={<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>}
           iconBg="#fef2f2" iconColor="#ef4444" isBad={failedRuns > 0} trend={failedRuns > 0 ? `${failedRuns} errors` : "None"} />
@@ -165,7 +177,9 @@ export default function RunHistory() {
             { key: "all", label: "All Runs" },
             { key: "manual", label: "Manual" },
             { key: "scheduler", label: "Scheduled" },
-            { key: "triggered", label: "Triggered" },
+            { key: "file_watch", label: "File Watch" },
+            { key: "folder_watch", label: "Folder Watch" },
+            { key: "event", label: "Events" },
           ].map(f => (
             <button
               key={f.key}
@@ -175,7 +189,11 @@ export default function RunHistory() {
               {f.label}
               <span style={{ ...s.filterCount, background: triggerFilter === f.key ? "#6366f120" : "#f1f5f9", color: triggerFilter === f.key ? "#6366f1" : "#94a3b8" }}>
                 {f.key === "all" ? runs.length :
-                 f.key === "triggered" ? runs.filter(r => r.triggered_by?.startsWith("trigger:")).length :
+                 f.key === "manual" ? runs.filter(r => !r.triggered_by || r.triggered_by === "manual").length :
+                 f.key === "scheduler" ? runs.filter(r => r.triggered_by === "scheduler" || r.triggered_by === "trigger:cron").length :
+                 f.key === "file_watch" ? runs.filter(r => r.triggered_by === "trigger:file_watch").length :
+                 f.key === "folder_watch" ? runs.filter(r => r.triggered_by === "trigger:folder_watch").length :
+                 f.key === "event" ? runs.filter(r => r.triggered_by === "trigger:email" || r.triggered_by === "trigger:event").length :
                  runs.filter(r => r.triggered_by === f.key).length}
               </span>
             </button>
@@ -206,10 +224,13 @@ export default function RunHistory() {
             ) : (
               pagedRuns.map((run) => {
                 const duration = (() => {
-                  if (!run.started_at || !run.ended_at) return "—";
-                  const ms = new Date(run.ended_at).getTime() - new Date(run.started_at).getTime();
-                  if (ms <= 0) return "—";
-                  return ms > 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+                  const start = parseDate(run.started_at);
+                  const end = parseDate(run.ended_at);
+                  if (!start || !end) return "—";
+                  const ms = end.getTime() - start.getTime();
+                  if (ms < 0) return "—";
+                  if (ms === 0) return "0ms";
+                  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
                 })();
                 return (
                   <tr key={run.id} style={s.tr}>
@@ -390,8 +411,9 @@ export default function RunHistory() {
 }
 
 function formatDate(dateStr) {
-  if (!dateStr) return "—";
-  return new Date(dateStr).toLocaleString("en-US", {
+  const dt = parseDate(dateStr);
+  if (!dt) return "—";
+  return dt.toLocaleString("en-US", {
     month: "short", day: "numeric", year: "numeric",
     hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
   }).replace(",", " ·");
@@ -449,8 +471,8 @@ const s = {
   statCard: { background: "var(--surface-bright)", padding: "28px 32px", borderRadius: 20, boxShadow: "0 4px 20px rgba(0,0,0,0.04)" },
   statTop: { marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center" },
   statIcon: { width: 44, height: 44, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 800 },
-  statLabel: { fontSize: 12, fontWeight: 800, color: "var(--on-surface-variant)", letterSpacing: "0.1em", marginBottom: 10, textTransform: "uppercase" },
-  statValue: { fontSize: 32, fontWeight: 800, fontFamily: "Manrope" },
+  statLabel: { fontSize: 11, fontWeight: 800, color: "var(--on-surface-variant)", letterSpacing: "0.1em", marginBottom: 10, textTransform: "uppercase" },
+  statValue: { fontSize: 22, fontWeight: 800, fontFamily: "Manrope", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
 
   tableCard: { background: "var(--surface-bright)", borderRadius: 14, boxShadow: "var(--ambient-shadow)", overflow: "hidden", marginBottom: 28 },
   tableToolbar: { display: "flex", gap: 4, padding: "14px 16px", borderBottom: "1px solid var(--outline)" },

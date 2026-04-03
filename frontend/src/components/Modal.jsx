@@ -7,12 +7,19 @@ export default function Modal({ children, onClose }) {
     return () => window.setModalOpen(false);
   }, []);
 
+  const mountNode = document.getElementById("modal-root");
+  if (!mountNode) {
+    console.warn("Modal: modal-root not found in DOM");
+    return null;
+  }
+
   return createPortal(
     <div
       style={{
         position: "fixed", inset: 0, zIndex: 1000,
         display: "flex", alignItems: "center", justifyContent: "center",
         padding: 32,
+        background: "rgba(15, 23, 42, 0.4)", backdropFilter: "blur(4px)",
       }}
       onClick={onClose}
     >
@@ -20,7 +27,7 @@ export default function Modal({ children, onClose }) {
         {children}
       </div>
     </div>,
-    document.getElementById("modal-root")
+    mountNode
   );
 }
 

@@ -8,7 +8,7 @@ import os
 import fnmatch
 import imaplib
 import email
-from datetime import datetime
+from datetime import datetime, timezone
 from execution.celery_app import celery_app
 from db.database import SessionLocal
 from db.models import Schedule, Task, Workflow, TaskRun
@@ -24,14 +24,14 @@ def poll_triggers():
         # Clean up stale runs stuck in "in_progress" for more than 10 minutes
         from datetime import timedelta
         from db.models import TaskRun
-        stale_cutoff = datetime.utcnow() - timedelta(minutes=10)
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
         stale = db.query(TaskRun).filter(
             TaskRun.status == "in_progress",
             TaskRun.started_at < stale_cutoff
         ).all()
         for run in stale:
             run.status = "failed"
-            run.ended_at = datetime.utcnow()
+            run.ended_at = datetime.now(timezone.utc)
             print(f"[trigger_poller] Marked stale run {run.id} as failed")
         if stale:
             db.commit()
@@ -69,7 +69,7 @@ def _fire_tasks(schedule, db, trigger_context: str = ""):
             status="in_progress",
             triggered_by=f"trigger:{schedule.trigger_type}",
             workflow_snapshot=workflow.graph_json,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
         )
         db.add(task_run)
         db.commit()
@@ -185,7 +185,7 @@ def _check_email_trigger(schedule, db):
             # Write email to uploads/emails — separate from inbox to avoid triggering folder_watch
             subject = msg.get("Subject", "email")
             safe_subject = "".join(c if c.isalnum() else "_" for c in subject)[:40]
-            filename = f"email_{safe_subject}_{int(datetime.utcnow().timestamp())}.txt"
+            filename = f"email_{safe_subject}_{int(datetime.now(timezone.utc).timestamp())}.txt"
             email_dir = os.path.join(UPLOAD_DIR, "emails")
             os.makedirs(email_dir, exist_ok=True)
             filepath = os.path.join(email_dir, filename)

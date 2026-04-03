@@ -54,7 +54,6 @@ export default function App() {
                 </main>
               </div>
             </div>
-            <div id="modal-root" />
           </div>
         } />
       </Routes>

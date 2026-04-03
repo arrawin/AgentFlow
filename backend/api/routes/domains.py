@@ -24,10 +24,14 @@ class DomainResponse(BaseModel):
 
 @router.post("/domains", response_model=DomainResponse)
 def create_domain(domain: DomainCreate, db: Session = Depends(get_db)):
-    existing = db.query(Domain).filter(Domain.name == domain.name).first()
+    import re as _re
+    clean_name = _re.sub(r'[<>"\';]', '', domain.name).strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Invalid domain name")
+    existing = db.query(Domain).filter(Domain.name == clean_name).first()
     if existing:
         raise HTTPException(status_code=400, detail="Domain already exists")
-    new_domain = Domain(name=domain.name, description=domain.description)
+    new_domain = Domain(name=clean_name, description=domain.description)
     db.add(new_domain)
     db.commit()
     db.refresh(new_domain)

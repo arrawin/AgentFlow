@@ -10,7 +10,7 @@ from services.llm_service import LLMService
 from tools.registry import TOOLS
 from db.database import SessionLocal
 from db.models import LLMConfig, Agent, TaskRun, RunLog
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter()
 
@@ -131,7 +131,7 @@ def run_output(req: RunOutputRequest):
             run.generated_files = req.generated_files
         if req.status in ("completed", "failed"):
             run.status = req.status
-            run.ended_at = datetime.utcnow()
+            run.ended_at = datetime.now(timezone.utc)
 
         db.commit()
         return {"ok": True}
