@@ -336,12 +336,20 @@ export default function Scheduler() {
             {(form.trigger_type === "folder_watch" || form.trigger_type === "file_watch") && (
               <>
                 <div style={s.field}>
-                  <label style={s.label}>WATCH PATH</label>
-                  <input style={s.input} placeholder="/app/uploads/watch" value={form.watch_path}
+                  <label style={s.label}>
+                    {form.trigger_type === "file_watch" ? "FILE PATH" : "WATCH PATH"}
+                  </label>
+                  <input style={s.input}
+                    placeholder={form.trigger_type === "file_watch" ? "/app/uploads/metrics.json" : "/app/uploads/inbox"}
+                    value={form.watch_path}
                     onChange={e => setForm(f => ({ ...f, watch_path: e.target.value }))} />
-                  <div style={s.hint}>Directory to monitor for new files. Use a dedicated input folder (e.g. /app/uploads/inbox) to avoid triggering on agent output files.</div>
+                  <div style={s.hint}>
+                    {form.trigger_type === "file_watch"
+                      ? "Full path to a specific file. Triggers when the file's content changes."
+                      : "Directory to monitor for new files. Use a dedicated input folder to avoid triggering on agent output files."}
+                  </div>
                 </div>
-                {form.trigger_type === "file_watch" && (
+                {form.trigger_type === "folder_watch" && (
                   <div style={s.field}>
                     <label style={s.label}>FILE PATTERN</label>
                     <input style={s.input} placeholder="*.csv" value={form.file_pattern}

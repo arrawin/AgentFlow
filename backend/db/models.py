@@ -80,6 +80,7 @@ class Schedule(Base):
     watch_path = Column(String, nullable=True)       # e.g. "/app/uploads/watch"
     file_pattern = Column(String, nullable=True)     # e.g. "*.csv" or "report_*.txt"
     last_seen_files = Column(JSON, default=list)     # tracks already-processed files
+    last_file_hash = Column(String, nullable=True)   # MD5 hash for file_watch change detection
 
     # Email (IMAP) config
     imap_host = Column(String, nullable=True)

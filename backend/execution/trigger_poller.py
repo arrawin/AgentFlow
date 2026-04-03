@@ -80,29 +80,56 @@ def _fire_tasks(schedule, db, trigger_context: str = ""):
 
 
 def _check_file_trigger(schedule, db):
-    """Check folder_watch and file_watch triggers."""
+    """
+    folder_watch — fires when NEW files matching a pattern appear in a directory.
+    file_watch   — fires when a SPECIFIC file's content changes (hash-based).
+    """
+    import hashlib
+
     watch_path = schedule.watch_path or UPLOAD_DIR
     pattern = schedule.file_pattern or "*"
 
     if not os.path.exists(watch_path):
         return
 
-    current_files = set()
-    for f in os.listdir(watch_path):
-        # Skip agent-generated output files (prefixed with _run_ or _agent_)
-        if f.startswith("_run_") or f.startswith("_agent_"):
-            continue
-        if fnmatch.fnmatch(f, pattern):
-            current_files.add(f)
+    if schedule.trigger_type == "file_watch":
+        # watch_path must point to a specific file, not a directory
+        if not os.path.isfile(watch_path):
+            print(f"[trigger_poller] file_watch: {watch_path} is not a file")
+            return
 
-    last_seen = set(schedule.last_seen_files or [])
-    new_files = current_files - last_seen
+        with open(watch_path, "rb") as f:
+            current_hash = hashlib.md5(f.read()).hexdigest()
 
-    if new_files:
-        print(f"[trigger_poller] New files detected in {watch_path}: {new_files}")
-        schedule.last_seen_files = list(current_files)
-        db.commit()
-        _fire_tasks(schedule, db, trigger_context=f"new files: {', '.join(new_files)}")
+        if schedule.last_file_hash is None:
+            # First time seeing this file — store hash, don't fire yet
+            schedule.last_file_hash = current_hash
+            db.commit()
+            return
+
+        if current_hash != schedule.last_file_hash:
+            print(f"[trigger_poller] file_watch: {watch_path} changed (hash mismatch)")
+            schedule.last_file_hash = current_hash
+            db.commit()
+            _fire_tasks(schedule, db, trigger_context=f"file changed: {os.path.basename(watch_path)}")
+
+    else:
+        # folder_watch — detect new files matching pattern
+        current_files = set()
+        for f in os.listdir(watch_path):
+            if f.startswith("_run_") or f.startswith("_agent_"):
+                continue
+            if fnmatch.fnmatch(f, pattern):
+                current_files.add(f)
+
+        last_seen = set(schedule.last_seen_files or [])
+        new_files = current_files - last_seen
+
+        if new_files:
+            print(f"[trigger_poller] folder_watch: new files in {watch_path}: {new_files}")
+            schedule.last_seen_files = list(current_files)
+            db.commit()
+            _fire_tasks(schedule, db, trigger_context=f"new files: {', '.join(new_files)}")
 
 
 def _check_email_trigger(schedule, db):
